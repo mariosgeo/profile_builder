@@ -5,6 +5,10 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pyproj import Transformer
 from scipy.interpolate import interp1d
+import tkinter as tk
+from tkinter import filedialog
+
+
 try:
     import cv2
     HAS_CV2 = True
@@ -226,7 +230,16 @@ st.markdown(css_styles, unsafe_allow_html=True)
 @st.cache_data
 def load_data():
     # Read the excel file
-    file_path = 'Locaties_einddiepte_S79.xlsx'
+    #file_path = 'Locaties_einddiepte_S79.xlsx'
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    file_path = filedialog.askopenfilename(
+        title="Select XLSX Data File",
+        filetypes=[("Marine Files", "*.xlsx"), ("All Files", "*.*")]
+    )
+    root.destroy()
+
     df = pd.read_excel(file_path, sheet_name='Locaties_einddiepte_LAT_3')
     
     # Coordinate Conversion:

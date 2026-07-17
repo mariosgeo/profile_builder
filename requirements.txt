@@ -8,3 +8,4 @@ openpyxl
 opencv-python
 scikit-learn
 scikit-image
+tkinter
