@@ -299,7 +299,7 @@ def clear_path_callback():
 
 # ── Inpainting interpolation ──────────────────────────────────────────────────
 def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, prop_col,
-                        interp_method="OpenCV TELEA inpainting"):
+                        interp_method="OpenCV TELEA inpainting", anis_x=1.0, anis_y=1.0):
     """Rasterise borehole layers onto a 2-D grid then fill the gaps.
 
     Parameters
@@ -393,8 +393,19 @@ def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, pr
     if interp_method.startswith("OpenCV") and HAS_CV2:
         img_u8 = (img * 255).clip(0, 255).astype(np.uint8)
         inpaint_mask = mask.copy()
-        inpaint_radius = max(int(round(min(nx, ny) * 0.05)), 3)
-        filled_u8 = cv2.inpaint(img_u8, inpaint_mask, inpaint_radius, cv2.INPAINT_TELEA)
+        if anis_x != 1.0 or anis_y != 1.0:
+            new_nx = max(3, int(round(nx / anis_x)))
+            new_ny = max(3, int(round(ny / anis_y)))
+            img_u8_res = cv2.resize(img_u8, (new_nx, new_ny), interpolation=cv2.INTER_NEAREST)
+            inpaint_mask_res = cv2.resize(inpaint_mask, (new_nx, new_ny), interpolation=cv2.INTER_NEAREST)
+            _, inpaint_mask_res = cv2.threshold(inpaint_mask_res, 127, 255, cv2.THRESH_BINARY)
+            
+            inpaint_radius = max(int(round(min(new_nx, new_ny) * 0.05)), 3)
+            filled_u8_res = cv2.inpaint(img_u8_res, inpaint_mask_res, inpaint_radius, cv2.INPAINT_TELEA)
+            filled_u8 = cv2.resize(filled_u8_res, (nx, ny), interpolation=cv2.INTER_LINEAR)
+        else:
+            inpaint_radius = max(int(round(min(nx, ny) * 0.05)), 3)
+            filled_u8 = cv2.inpaint(img_u8, inpaint_mask, inpaint_radius, cv2.INPAINT_TELEA)
         filled = filled_u8.astype(np.float32) / 255.0
 
     elif interp_method.startswith("scipy"):
@@ -402,8 +413,10 @@ def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, pr
         sci_method = "linear" if "linear" in interp_method else \
                      "cubic"  if "cubic"  in interp_method else "nearest"
         if len(known_vals) > 0:
+            train_pts_scaled = train_pts * np.array([anis_x, anis_y])
+            query_pts_scaled = query_pts * np.array([anis_x, anis_y])
             filled_flat = scipy_griddata(
-                train_pts, known_vals, query_pts, method=sci_method,
+                train_pts_scaled, known_vals, query_pts_scaled, method=sci_method,
                 fill_value=float(np.nanmean(known_vals))
             )
             filled = filled_flat.reshape(ny, nx).astype(np.float32)
@@ -418,10 +431,12 @@ def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, pr
         if len(known_vals) > 0:
             # Normalise coords so x and y have comparable scales
             scaler = StandardScaler().fit(train_pts)
+            X_train = scaler.transform(train_pts) * np.array([anis_x, anis_y])
+            X_query = scaler.transform(query_pts) * np.array([anis_x, anis_y])
             filled_flat = RBFInterpolator(
-                scaler.transform(train_pts), known_vals,
+                X_train, known_vals,
                 kernel='thin_plate_spline'
-            )(scaler.transform(query_pts))
+            )(X_query)
             filled = filled_flat.reshape(ny, nx).astype(np.float32)
         else:
             filled = img.copy()
@@ -432,27 +447,30 @@ def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, pr
         from sklearn.preprocessing import StandardScaler
         if len(known_vals) > 0 and len(known_vals) <= 2000:
             scaler = StandardScaler().fit(train_pts)
-            X_train = scaler.transform(train_pts)
+            X_train = scaler.transform(train_pts) * np.array([anis_x, anis_y])
+            X_query = scaler.transform(query_pts) * np.array([anis_x, anis_y])
             kernel = RBF(length_scale=1.0) + WhiteKernel(noise_level=1e-4)
             gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=0,
                                            normalize_y=True)
             gpr.fit(X_train, known_vals)
-            filled_flat = gpr.predict(scaler.transform(query_pts))
+            filled_flat = gpr.predict(X_query)
             filled = np.clip(filled_flat, 0, 1).reshape(ny, nx).astype(np.float32)
         elif len(known_vals) > 2000:
             # Too many points – fall back to RBF for performance
             from scipy.interpolate import RBFInterpolator
             from sklearn.preprocessing import StandardScaler
             scaler = StandardScaler().fit(train_pts)
+            X_train = scaler.transform(train_pts) * np.array([anis_x, anis_y])
+            X_query = scaler.transform(query_pts) * np.array([anis_x, anis_y])
             filled_flat = RBFInterpolator(
-                scaler.transform(train_pts), known_vals,
+                X_train, known_vals,
                 kernel='thin_plate_spline'
-            )(scaler.transform(query_pts))
+            )(X_query)
             filled = filled_flat.reshape(ny, nx).astype(np.float32)
         else:
             filled = img.copy()
 
-    elif interp_method.startswith("skimage \u2013 biharmonic"):
+    elif interp_method.startswith("skimage – biharmonic"):
         try:
             from skimage.restoration import inpaint_biharmonic
             # inpaint_biharmonic expects a float image in [0,1] and a bool mask
@@ -460,19 +478,34 @@ def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, pr
             bih_mask = (mask == 255).astype(bool)   # True = gap to fill
             # Do not inpaint pixels that are outside the surface envelope
             bih_mask[outside] = False
-            filled = inpaint_biharmonic(
-                img.astype(np.float64), bih_mask
-            ).astype(np.float32)
+            
+            if (anis_x != 1.0 or anis_y != 1.0) and HAS_CV2:
+                new_nx = max(3, int(round(nx / anis_x)))
+                new_ny = max(3, int(round(ny / anis_y)))
+                img_res = cv2.resize(img.astype(np.float32), (new_nx, new_ny), interpolation=cv2.INTER_NEAREST)
+                bih_mask_res = cv2.resize(bih_mask.astype(np.uint8), (new_nx, new_ny), interpolation=cv2.INTER_NEAREST).astype(bool)
+                
+                filled_res = inpaint_biharmonic(
+                    img_res.astype(np.float64), bih_mask_res
+                ).astype(np.float32)
+                
+                filled = cv2.resize(filled_res, (nx, ny), interpolation=cv2.INTER_LINEAR)
+            else:
+                filled = inpaint_biharmonic(
+                    img.astype(np.float64), bih_mask
+                ).astype(np.float32)
         except ImportError:
-            st.warning("\u26a0\ufe0f `scikit-image` not found \u2013 run `pip install scikit-image` or choose another method.")
+            st.warning("⚠️ `scikit-image` not found – run `pip install scikit-image` or choose another method.")
             filled = img.copy()
 
     else:
         # Default nearest-neighbour fallback
         from scipy.interpolate import griddata as scipy_griddata
         if len(known_vals) > 0:
+            train_pts_scaled = train_pts * np.array([anis_x, anis_y])
+            query_pts_scaled = query_pts * np.array([anis_x, anis_y])
             filled_flat = scipy_griddata(
-                train_pts, known_vals, query_pts, method='nearest',
+                train_pts_scaled, known_vals, query_pts_scaled, method='nearest',
                 fill_value=float(np.nanmean(known_vals))
             )
             filled = filled_flat.reshape(ny, nx).astype(np.float32)
@@ -635,6 +668,19 @@ interp_method = st.sidebar.selectbox(
 )
 if not HAS_CV2 and interp_method.startswith("OpenCV"):
     st.sidebar.warning("`opencv-python` is not installed – please choose another method.")
+
+# Anisotropy / Layer Continuation Settings
+st.sidebar.markdown('<div class="sidebar-title" style="margin-top:1rem;">📐 Anisotropy (Layer Continuation)</div>', unsafe_allow_html=True)
+anis_x = st.sidebar.slider(
+    "Horizontal weight (X)",
+    min_value=0.01, max_value=10.0, value=1.0, step=0.05,
+    help="Lower values relative to Y shrink the horizontal coordinate, enforcing layer continuation."
+)
+anis_y = st.sidebar.slider(
+    "Vertical weight (Y)",
+    min_value=0.01, max_value=10.0, value=1.0, step=0.05,
+    help="Standard vertical weight. Usually kept at 1.0."
+)
 
 st.sidebar.info("Select boreholes from the dropdown or click markers on the map to start building your profile path.")
 
@@ -986,12 +1032,16 @@ else:
                     interp_dx, interp_dy,
                     "63calculated. met zoutcorrectie",
                     interp_method=interp_method,
+                    anis_x=anis_x,
+                    anis_y=anis_y,
                 )
                 xd50, yd50, gridd50 = interpolate_profile(
                     prof_df, cum_dist, top_points, bottom_points,
                     interp_dx, interp_dy,
                     "d50",
                     interp_method=interp_method,
+                    anis_x=anis_x,
+                    anis_y=anis_y,
                 )
 
                 # Build tick labels matching borehole positions
