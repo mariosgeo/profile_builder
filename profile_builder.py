@@ -5,8 +5,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pyproj import Transformer
 from scipy.interpolate import interp1d
-import tkinter as tk
-from tkinter import filedialog
+#import tkinter as tk
+#from tkinter import filedialog
 
 
 try:
@@ -231,16 +231,8 @@ st.markdown(css_styles, unsafe_allow_html=True)
 def load_data():
     # Read the excel file
     #file_path = 'Locaties_einddiepte_S79.xlsx'
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    file_path = filedialog.askopenfilename(
-        title="Select XLSX Data File",
-        filetypes=[("Marine Files", "*.xlsx"), ("All Files", "*.*")]
-    )
-    root.destroy()
 
-    df = pd.read_excel(file_path, sheet_name='Locaties_einddiepte_LAT_3')
+    df = pd.read_excel(st.file_uploader("Upload your Excel file", type=["xlsx"]), sheet_name='Locaties_einddiepte_LAT_3')
     
     # Coordinate Conversion:
     # Source coordinates X, Y in the sheet are in UTM Zone 31N (EPSG:32631).
