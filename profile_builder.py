@@ -228,11 +228,8 @@ st.markdown(css_styles, unsafe_allow_html=True)
 
 # 4. Data Ingestion & Caching
 @st.cache_data
-def load_data():
-    # Read the excel file
-    #file_path = 'Locaties_einddiepte_S79.xlsx'
-
-    df = pd.read_excel(st.file_uploader("Upload your Excel file", type=["xlsx"]), sheet_name='Locaties_einddiepte_LAT_3')
+def load_data(uploaded_file):
+    df = pd.read_excel(uploaded_file, sheet_name='Locaties_einddiepte_LAT_3')
     
     # Coordinate Conversion:
     # Source coordinates X, Y in the sheet are in UTM Zone 31N (EPSG:32631).
@@ -250,10 +247,15 @@ def load_data():
     df['Y_RD'] = y_rd
     return df
 
-try:
-    df = load_data()
-except Exception as e:
-    st.error(f"Failed to load data: {e}")
+uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
+if uploaded_file is not None:
+    try:
+        df = load_data(uploaded_file)
+    except Exception as e:
+        st.error(f"Failed to load data: {e}")
+        st.stop()
+else:
+    st.info("Please upload an Excel file to get started.")
     st.stop()
 
 # 5. Extract Unique Coordinates and Boreholes
