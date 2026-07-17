@@ -573,6 +573,10 @@ st.sidebar.markdown('<div class="sidebar-title">🧭 Profile Settings</div>', un
 # Toggle to show value labels on profile bars
 show_labels = st.sidebar.checkbox("🏷️ Show values on plot", value=True)
 
+# Force white plot backgrounds for exporting
+force_white_plots = st.sidebar.checkbox("⚪ Export-ready plots (white bg, black text)", value=False)
+is_dark_plot = IS_DARK and not force_white_plots
+
 # Plot spacing (bar width in meters)
 bar_width = st.sidebar.slider(
     "📏 Borehole Bar Width (m)",
@@ -873,12 +877,12 @@ else:
                     y=0.45
                 ),
                 showscale=True,
-                line=dict(color='rgba(0,0,0,0.15)' if not IS_DARK else 'rgba(255,255,255,0.15)', width=0.4)
+                line=dict(color='rgba(0,0,0,0.15)' if not is_dark_plot else 'rgba(255,255,255,0.15)', width=0.4)
             ),
             text=prof_df['63calculated_text'] if show_labels else None,
             textposition='inside',
             insidetextanchor='middle',
-            textfont=dict(color='white' if IS_DARK else 'black', size=10),
+            textfont=dict(color='white' if is_dark_plot else 'black', size=10),
             hoverinfo='text',
             hovertext=[
                 f"Borehole: {row['Boornummer']}<br>"
@@ -912,12 +916,12 @@ else:
                     y=0.45
                 ),
                 showscale=True,
-                line=dict(color='rgba(0,0,0,0.15)' if not IS_DARK else 'rgba(255,255,255,0.15)', width=0.4)
+                line=dict(color='rgba(0,0,0,0.15)' if not is_dark_plot else 'rgba(255,255,255,0.15)', width=0.4)
             ),
             text=prof_df['d50_text'] if show_labels else None,
             textposition='inside',
             insidetextanchor='middle',
-            textfont=dict(color='white' if IS_DARK else 'black', size=10),
+            textfont=dict(color='white' if is_dark_plot else 'black', size=10),
             hoverinfo='text',
             hovertext=[
                 f"Borehole: {row['Boornummer']}<br>"
@@ -938,7 +942,7 @@ else:
                 x=[p[0] for p in top_points],
                 y=[p[1] for p in top_points],
                 mode='lines+markers',
-                line=dict(color='#ef4444' if not IS_DARK else '#fca5a5', width=2, dash='dash'),
+                line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2, dash='dash'),
                 marker=dict(size=6, color='#ef4444'),
                 name='Top Surface (LAT)',
                 showlegend=(col_idx == 1)  # Only show once in the legend
@@ -951,7 +955,7 @@ else:
                 x=[p[0] for p in bottom_points],
                 y=[p[1] for p in bottom_points],
                 mode='lines+markers',
-                line=dict(color='#3b82f6' if not IS_DARK else '#93c5fd', width=2, dash='dash'),
+                line=dict(color='#3b82f6' if not is_dark_plot else '#93c5fd', width=2, dash='dash'),
                 marker=dict(size=6, color='#3b82f6'),
                 name='Borehole Bottom (LAT)',
                 showlegend=(col_idx == 1)
@@ -964,7 +968,7 @@ else:
     tick_text = [f"<b>{bh}</b><br>{cum_dist[bh]:.0f}m" for bh in st.session_state.custom_profile]
     
     fig_sub.update_layout(
-        template="plotly_dark" if IS_DARK else "plotly_white",
+        template="plotly_dark" if is_dark_plot else "plotly_white",
         height=620,
         margin=dict(l=50, r=120, t=70, b=50),
         legend=dict(
@@ -974,19 +978,19 @@ else:
             xanchor="center",
             x=0.5
         ),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
+        plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
     )
     
     # Configure axes
     fig_sub.update_yaxes(
         title_text="Depth below LAT (m)", 
         autorange="reversed", 
-        gridcolor="rgba(0,0,0,0.06)" if not IS_DARK else "rgba(255,255,255,0.06)",
+        gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
         row=1, col=1
     )
     fig_sub.update_yaxes(
-        gridcolor="rgba(0,0,0,0.06)" if not IS_DARK else "rgba(255,255,255,0.06)",
+        gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
         row=1, col=2
     )
     
@@ -995,7 +999,7 @@ else:
         tickvals=tick_vals,
         ticktext=tick_text,
         tickmode='array',
-        gridcolor="rgba(0,0,0,0.06)" if not IS_DARK else "rgba(255,255,255,0.06)",
+        gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
         row=1, col=1
     )
     fig_sub.update_xaxes(
@@ -1003,7 +1007,7 @@ else:
         tickvals=tick_vals,
         ticktext=tick_text,
         tickmode='array',
-        gridcolor="rgba(0,0,0,0.06)" if not IS_DARK else "rgba(255,255,255,0.06)",
+        gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
         row=1, col=2
     )
 
@@ -1063,12 +1067,12 @@ else:
                     tickvals=tick_vals_inp,
                     ticktext=tick_text_inp,
                     tickmode='array',
-                    gridcolor="rgba(0,0,0,0.06)" if not IS_DARK else "rgba(255,255,255,0.06)",
+                    gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
                 )
                 yaxis_common = dict(
                     title="Depth below LAT (m)",
                     autorange="reversed",
-                    gridcolor="rgba(0,0,0,0.06)" if not IS_DARK else "rgba(255,255,255,0.06)",
+                    gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
                 )
 
                 # ── Silt / Clay heatmap ───────────────────────────────────────
@@ -1087,24 +1091,24 @@ else:
                 fig63.add_trace(go.Scatter(
                     x=top_x, y=top_y,
                     mode='lines+markers',
-                    line=dict(color='#ef4444', width=2, dash='dash'),
+                    line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2, dash='dash'),
                     marker=dict(size=6, color='#ef4444'),
                     name='Top Surface (LAT)'
                 ))
                 fig63.add_trace(go.Scatter(
                     x=bot_x, y=bot_y,
                     mode='lines+markers',
-                    line=dict(color='#3b82f6', width=2, dash='dash'),
+                    line=dict(color='#3b82f6' if not is_dark_plot else '#93c5fd', width=2, dash='dash'),
                     marker=dict(size=6, color='#3b82f6'),
                     name='Borehole Bottom (LAT)'
                 ))
                 fig63.update_layout(
                     title="<b>Silt/Clay Content (%) – Interpolated</b>",
-                    template="plotly_dark" if IS_DARK else "plotly_white",
+                    template="plotly_dark" if is_dark_plot else "plotly_white",
                     height=420,
                     margin=dict(l=60, r=20, t=60, b=50),
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
+                    plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
                     xaxis=dict(title="Distance along profile path (m)", **axis_common),
                     yaxis=dict(**yaxis_common),
                     legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
@@ -1126,24 +1130,24 @@ else:
                 fig_d50.add_trace(go.Scatter(
                     x=top_x, y=top_y,
                     mode='lines+markers',
-                    line=dict(color='#ef4444', width=2, dash='dash'),
+                    line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2, dash='dash'),
                     marker=dict(size=6, color='#ef4444'),
                     name='Top Surface (LAT)'
                 ))
                 fig_d50.add_trace(go.Scatter(
                     x=bot_x, y=bot_y,
                     mode='lines+markers',
-                    line=dict(color='#3b82f6', width=2, dash='dash'),
+                    line=dict(color='#3b82f6' if not is_dark_plot else '#93c5fd', width=2, dash='dash'),
                     marker=dict(size=6, color='#3b82f6'),
                     name='Borehole Bottom (LAT)'
                 ))
                 fig_d50.update_layout(
                     title="<b>Median Grain Size d50 (mm) – Interpolated</b>",
-                    template="plotly_dark" if IS_DARK else "plotly_white",
+                    template="plotly_dark" if is_dark_plot else "plotly_white",
                     height=420,
                     margin=dict(l=60, r=20, t=60, b=50),
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
+                    plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
                     xaxis=dict(title="Distance along profile path (m)", **axis_common),
                     yaxis=dict(**yaxis_common),
                     legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
