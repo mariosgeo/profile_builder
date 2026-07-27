@@ -1472,6 +1472,13 @@ else:
         )
     )
     
+    # Calculate variable bar widths per layer block based on parameter values (analogous to value)
+    silt_norm_vals = map_values_to_equal_bins(prof_df['63calculated. met zoutcorrectie'], SILT_BINS)
+    silt_layer_widths = (0.3 + 0.9 * np.nan_to_num(silt_norm_vals, nan=0.0)) * bar_width
+
+    d50_norm_vals = map_values_to_equal_bins(prof_df['d50'], D50_BINS)
+    d50_layer_widths = (0.3 + 0.9 * np.nan_to_num(d50_norm_vals, nan=0.0)) * bar_width
+
     # Trace 1: Silt/Clay profile
     silt_bar_color = map_values_to_equal_bins(prof_df['63calculated. met zoutcorrectie'], SILT_BINS) if selected_cmap_63 == 'Custom (Discrete)' else prof_df['63calculated. met zoutcorrectie']
     fig_sub.add_trace(
@@ -1479,7 +1486,7 @@ else:
             x=prof_df['cum_dist'],
             y=heights,
             base=bottoms,
-            width=bar_width,
+            width=silt_layer_widths,
             marker=dict(
                 color=silt_bar_color,
                 colorscale=colorscale_63,
@@ -1513,7 +1520,7 @@ else:
             x=prof_df['cum_dist'],
             y=heights,
             base=bottoms,
-            width=bar_width,
+            width=d50_layer_widths,
             marker=dict(
                 color=d50_bar_color,
                 colorscale=colorscale_d50,
