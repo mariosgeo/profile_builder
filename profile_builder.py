@@ -1313,7 +1313,7 @@ for bh in df_coords['Boornummer']:
         seq = profile_set[bh] + 1            # 1-based sequence number
         marker_colors.append('#dc2626')      # red = selected in profile path sequence
         marker_sizes.append(16)
-        marker_texts.append(f"<b>{seq}</b>")
+        marker_texts.append(f"<b>{seq}. {bh}</b>")
     else:
         marker_colors.append('#22c55e')      # green dot for all available boreholes
         marker_sizes.append(10)
@@ -1372,8 +1372,10 @@ fig_map.update_layout(
         style="open-street-map" if not IS_DARK else "carto-darkmatter",
         center=dict(lat=df_coords['lat'].mean(), lon=df_coords['lon'].mean()),
         zoom=map_zoom_level,
-        layers=mapbox_layers
+        layers=mapbox_layers,
+        uirevision=f"keep_zoom_{map_zoom_level}"
     ),
+    uirevision=f"keep_zoom_{map_zoom_level}",
     clickmode='event+select',
     margin=dict(l=0, r=0, t=0, b=0),
     height=400,
