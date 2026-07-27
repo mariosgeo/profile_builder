@@ -73,6 +73,104 @@ def create_discrete_colorscale(bins, hex_colors):
         
     return colorscale
 
+def get_profile_bathymetry(profile_bh_list, df_coords, bath_file_bytes=None, step_m=2.0):
+    """
+    Samples bathymetry continuously along the polyline connecting profile_bh_list.
+    Returns list of (dist, depth) pairs where depth is positive depth below LAT (m).
+    """
+    if not profile_bh_list or len(profile_bh_list) < 2:
+        return []
+
+    bh_map = {}
+    for bh in profile_bh_list:
+        r = df_coords[df_coords['Boornummer'] == bh]
+        if not r.empty:
+            bh_map[bh] = (r['X'].iloc[0], r['Y'].iloc[0])
+
+    if len(bh_map) < 2:
+        return []
+
+    coords_x = []
+    coords_y = []
+    seg_dists = [0.0]
+    last_x, last_y = None, None
+    cum = 0.0
+
+    for bh in profile_bh_list:
+        if bh in bh_map:
+            x, y = bh_map[bh]
+            coords_x.append(x)
+            coords_y.append(y)
+            if last_x is not None:
+                cum += np.sqrt((x - last_x)**2 + (y - last_y)**2)
+            seg_dists.append(cum)
+            last_x, last_y = x, y
+
+    total_dist = cum
+    if total_dist <= 0:
+        return []
+
+    seg_dists = np.array(seg_dists[1:])
+    coords_x = np.array(coords_x)
+    coords_y = np.array(coords_y)
+
+    n_pts = max(50, int(np.ceil(total_dist / step_m)))
+    dist_arr = np.linspace(0, total_dist, n_pts)
+
+    try:
+        fx = interp1d(seg_dists, coords_x, kind='linear')
+        fy = interp1d(seg_dists, coords_y, kind='linear')
+        line_x = fx(dist_arr)
+        line_y = fy(dist_arr)
+    except Exception:
+        return []
+
+    to_25831 = Transformer.from_crs("EPSG:32631", "EPSG:25831", always_xy=True)
+    line_x25831, line_y25831 = to_25831.transform(line_x, line_y)
+
+    coords_reproj = list(zip(line_x25831, line_y25831))
+    coords_direct = list(zip(line_x, line_y))
+
+    sampled = None
+    try:
+        import rasterio
+        from rasterio.io import MemoryFile
+        import os
+
+        src = None
+        if bath_file_bytes is not None:
+            memfile = MemoryFile(bath_file_bytes)
+            src = memfile.open()
+        elif os.path.exists("25NZE4376ml9_1.img"):
+            src = rasterio.open("25NZE4376ml9_1.img")
+
+        if src is not None:
+            nodata = src.nodata
+            s_reproj = [v[0] for v in src.sample(coords_reproj)]
+            valid_reproj = [v for v in s_reproj if v is not None and not np.isnan(v) and (nodata is None or not np.isclose(v, nodata)) and -9000 < v < 9000]
+
+            if len(valid_reproj) > 0:
+                sampled = s_reproj
+            else:
+                s_direct = [v[0] for v in src.sample(coords_direct)]
+                valid_direct = [v for v in s_direct if v is not None and not np.isnan(v) and (nodata is None or not np.isclose(v, nodata)) and -9000 < v < 9000]
+                if len(valid_direct) > 0:
+                    sampled = s_direct
+
+            src.close()
+
+        if sampled is not None:
+            bath_points = []
+            for d, v in zip(dist_arr, sampled):
+                if v is not None and not np.isnan(v) and (nodata is None or not np.isclose(v, nodata)) and -9000 < v < 9000:
+                    depth = abs(v) if v < 0 else v
+                    bath_points.append((float(d), float(depth)))
+            return bath_points
+    except Exception:
+        pass
+
+    return []
+
 # 1. Page Configuration
 st.set_page_config(
     page_title="Geotechnical Profile Builder",
@@ -1005,19 +1103,30 @@ else:
     prof_df['63calculated_text'] = prof_df['63calculated. met zoutcorrectie'].apply(lambda v: f"{v:.1f}%")
     prof_df['d50_text'] = prof_df['d50'].apply(lambda v: f"{v:.3f}")
     
-    # Build Topography, Bottom, and Map Bathymetry Boundaries
-    top_points = []
+    # ── Continuous Bathymetry Top Surface along the selected profile transect ──
+    bath_points = get_profile_bathymetry(
+        st.session_state.custom_profile,
+        df_coords,
+        bath_file_bytes=uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None,
+        step_m=min(interp_dx, 2.0)
+    )
+
     bottom_points = []
-    bath_points = []
     for bh in st.session_state.custom_profile:
         bh_df = prof_df[prof_df['Boornummer'] == bh]
         if not bh_df.empty:
-            top_points.append((cum_dist[bh], bh_df['Tra_van_lat'].min()))
             bottom_points.append((cum_dist[bh], bh_df['Tra_tot_lat'].max()))
-            if 'bathymetry' in bh_df.columns:
-                b_val = bh_df['bathymetry'].iloc[0]
-                if pd.notna(b_val):
-                    bath_points.append((cum_dist[bh], b_val))
+
+    if bath_points:
+        top_points = bath_points
+        top_label = 'Bathymetry (LAT)'
+    else:
+        top_points = []
+        for bh in st.session_state.custom_profile:
+            bh_df = prof_df[prof_df['Boornummer'] == bh]
+            if not bh_df.empty:
+                top_points.append((cum_dist[bh], bh_df['Tra_van_lat'].min()))
+        top_label = 'Top Surface (LAT)'
             
     # KPI Stats for the profile path
     num_bh_selected = len(st.session_state.custom_profile)
@@ -1112,16 +1221,15 @@ else:
         row=1, col=2
     )
     
-    # Add Topography Line (connect tops of columns) to both subplots
+    # Add Bathymetry Line (connect continuous bathymetry points) to both subplots
     for col_idx in [1, 2]:
         fig_sub.add_trace(
             go.Scatter(
                 x=[p[0] for p in top_points],
                 y=[p[1] for p in top_points],
-                mode='lines+markers',
-                line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2, dash='dash'),
-                marker=dict(size=6, color='#ef4444'),
-                name='Top Surface (LAT)',
+                mode='lines',
+                line=dict(color='#16a34a' if not is_dark_plot else '#4ade80', width=3),
+                name=top_label,
                 showlegend=(col_idx == 1)  # Only show once in the legend
             ),
             row=1, col=col_idx
@@ -1139,20 +1247,6 @@ else:
             ),
             row=1, col=col_idx
         )
-        # Add Map Bathymetry line (Green)
-        if bath_points:
-            fig_sub.add_trace(
-                go.Scatter(
-                    x=[p[0] for p in bath_points],
-                    y=[p[1] for p in bath_points],
-                    mode='lines+markers',
-                    line=dict(color='#16a34a' if not is_dark_plot else '#4ade80', width=3.5),
-                    marker=dict(symbol='diamond', size=8, color='#16a34a' if not is_dark_plot else '#4ade80', line=dict(width=1, color='white' if is_dark_plot else '#18181b')),
-                    name='Map Bathymetry (LAT)',
-                    showlegend=(col_idx == 1)
-                ),
-                row=1, col=col_idx
-            )
         
     # Set tick marks matching the selection path
     tick_vals = [cum_dist[bh] for bh in st.session_state.custom_profile]
@@ -1281,10 +1375,9 @@ else:
                 ))
                 fig63.add_trace(go.Scatter(
                     x=top_x, y=top_y,
-                    mode='lines+markers',
-                    line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2, dash='dash'),
-                    marker=dict(size=6, color='#ef4444'),
-                    name='Top Surface (LAT)'
+                    mode='lines',
+                    line=dict(color='#16a34a' if not is_dark_plot else '#4ade80', width=3),
+                    name=top_label
                 ))
                 fig63.add_trace(go.Scatter(
                     x=bot_x, y=bot_y,
@@ -1293,15 +1386,6 @@ else:
                     marker=dict(size=6, color='#3b82f6'),
                     name='Ligging zeebodem (ALAT)'
                 ))
-                if bath_points:
-                    fig63.add_trace(go.Scatter(
-                        x=[p[0] for p in bath_points],
-                        y=[p[1] for p in bath_points],
-                        mode='lines+markers',
-                        line=dict(color='#16a34a' if not is_dark_plot else '#4ade80', width=3.5),
-                        marker=dict(symbol='diamond', size=8, color='#16a34a' if not is_dark_plot else '#4ade80', line=dict(width=1, color='white' if is_dark_plot else '#18181b')),
-                        name='Map Bathymetry (LAT)'
-                    ))
                 fig63.update_layout(
                     title="<b>Silt/Clay Content (%) – Interpolated</b>",
                     template="plotly_dark" if is_dark_plot else "plotly_white",
@@ -1329,10 +1413,9 @@ else:
                 ))
                 fig_d50.add_trace(go.Scatter(
                     x=top_x, y=top_y,
-                    mode='lines+markers',
-                    line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2, dash='dash'),
-                    marker=dict(size=6, color='#ef4444'),
-                    name='Top Surface (LAT)'
+                    mode='lines',
+                    line=dict(color='#16a34a' if not is_dark_plot else '#4ade80', width=3),
+                    name=top_label
                 ))
                 fig_d50.add_trace(go.Scatter(
                     x=bot_x, y=bot_y,
@@ -1341,15 +1424,6 @@ else:
                     marker=dict(size=6, color='#3b82f6'),
                     name='Ligging zeebodem (ALAT)'
                 ))
-                if bath_points:
-                    fig_d50.add_trace(go.Scatter(
-                        x=[p[0] for p in bath_points],
-                        y=[p[1] for p in bath_points],
-                        mode='lines+markers',
-                        line=dict(color='#16a34a' if not is_dark_plot else '#4ade80', width=3.5),
-                        marker=dict(symbol='diamond', size=8, color='#16a34a' if not is_dark_plot else '#4ade80', line=dict(width=1, color='white' if is_dark_plot else '#18181b')),
-                        name='Map Bathymetry (LAT)'
-                    ))
                 fig_d50.update_layout(
                     title="<b>Median Grain Size d50 (mm) – Interpolated</b>",
                     template="plotly_dark" if is_dark_plot else "plotly_white",
