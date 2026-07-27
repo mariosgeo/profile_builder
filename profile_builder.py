@@ -286,29 +286,73 @@ st.markdown(css_styles, unsafe_allow_html=True)
 
 # 4. Data Ingestion & Caching
 @st.cache_data
-def load_data(uploaded_file):
+def load_data(uploaded_file, bath_file_bytes=None):
     df = pd.read_excel(uploaded_file, sheet_name='Locaties_einddiepte_LAT_3')
     
     # Coordinate Conversion:
     # Source coordinates X, Y in the sheet are in UTM Zone 31N (EPSG:32631).
     # We transform them to Lat/Lon (EPSG:4326) for Mapbox.
     # We also transform them to RD coordinates (EPSG:28992) for local display.
+    # We transform them to EPSG:25831 for bathymetry raster lookup.
     to_wgs84 = Transformer.from_crs("EPSG:32631", "EPSG:4326", always_xy=True)
     to_rd = Transformer.from_crs("EPSG:32631", "EPSG:28992", always_xy=True)
+    to_25831 = Transformer.from_crs("EPSG:32631", "EPSG:25831", always_xy=True)
     
     lons, lats = to_wgs84.transform(df['X'].values, df['Y'].values)
     x_rd, y_rd = to_rd.transform(df['X'].values, df['Y'].values)
+    x_25831, y_25831 = to_25831.transform(df['X'].values, df['Y'].values)
     
     df['lon'] = lons
     df['lat'] = lats
     df['X_RD'] = x_rd
     df['Y_RD'] = y_rd
+    df['X_25831'] = x_25831
+    df['Y_25831'] = y_25831
+
+    # Sample Bathymetry from map on EPSG:25831
+    sampled_vals = None
+    try:
+        import rasterio
+        from rasterio.io import MemoryFile
+        import os
+
+        coords = list(zip(x_25831, y_25831))
+
+        if bath_file_bytes is not None:
+            with MemoryFile(bath_file_bytes) as memfile:
+                with memfile.open() as src:
+                    nodata = src.nodata
+                    sampled_vals = [val[0] for val in src.sample(coords)]
+        elif os.path.exists("25NZE4376ml9_1.img"):
+            with rasterio.open("25NZE4376ml9_1.img") as src:
+                nodata = src.nodata
+                sampled_vals = [val[0] for val in src.sample(coords)]
+        
+        if sampled_vals is not None:
+            bath_depths = []
+            for v in sampled_vals:
+                if v is None or np.isnan(v) or (nodata is not None and np.isclose(v, nodata)) or v > 9000 or v < -9000:
+                    bath_depths.append(np.nan)
+                else:
+                    bath_depths.append(abs(v) if v < 0 else v)
+            df['bathymetry'] = bath_depths
+        else:
+            df['bathymetry'] = np.nan
+    except Exception as e:
+        df['bathymetry'] = np.nan
+
     return df
 
-uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
+col_up1, col_up2 = st.columns([2, 1])
+with col_up1:
+    uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
+with col_up2:
+    uploaded_bath_file = st.file_uploader("Optional: Bathymetry Map (.img / .tif)", type=["img", "tif", "geotiff"])
+
 if uploaded_file is not None:
     try:
-        df = load_data(uploaded_file)
+        bath_bytes = uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None
+        df = load_data(uploaded_file, bath_file_bytes=bath_bytes)
     except Exception as e:
         st.error(f"Failed to load data: {e}")
         st.stop()
@@ -317,7 +361,7 @@ else:
     st.stop()
 
 # 5. Extract Unique Coordinates and Boreholes
-df_coords = df[['Boornummer', 'X', 'Y', 'lat', 'lon', 'X_RD', 'Y_RD']].drop_duplicates().sort_values('Boornummer')
+df_coords = df[['Boornummer', 'X', 'Y', 'lat', 'lon', 'X_RD', 'Y_RD', 'X_25831', 'Y_25831', 'bathymetry']].drop_duplicates().sort_values('Boornummer')
 boreholes = list(df_coords['Boornummer'].unique())
 
 # Initialize session state variables
@@ -854,7 +898,8 @@ fig_map.add_trace(go.Scattermapbox(
         f"<b>Borehole: {row['Boornummer']}</b><br>"
         f"UTM X: {row['X']:.1f}, Y: {row['Y']:.1f}<br>"
         f"RD X: {row['X_RD']:.1f}, Y: {row['Y_RD']:.1f}<br>"
-        f"Lat: {row['lat']:.5f}, Lon: {row['lon']:.5f}"
+        f"Lat: {row['lat']:.5f}, Lon: {row['lon']:.5f}<br>"
+        + (f"Bathymetry: {row['bathymetry']:.2f} m" if pd.notna(row.get('bathymetry')) else "Bathymetry: N/A")
         for _, row in df_coords.iterrows()
     ],
     customdata=df_coords['Boornummer'].values,
@@ -934,14 +979,19 @@ else:
     prof_df['63calculated_text'] = prof_df['63calculated. met zoutcorrectie'].apply(lambda v: f"{v:.1f}%")
     prof_df['d50_text'] = prof_df['d50'].apply(lambda v: f"{v:.3f}")
     
-    # Build Topography and Bottom Boundaries
+    # Build Topography, Bottom, and Map Bathymetry Boundaries
     top_points = []
     bottom_points = []
+    bath_points = []
     for bh in st.session_state.custom_profile:
         bh_df = prof_df[prof_df['Boornummer'] == bh]
         if not bh_df.empty:
             top_points.append((cum_dist[bh], bh_df['Tra_van_lat'].min()))
             bottom_points.append((cum_dist[bh], bh_df['Tra_tot_lat'].max()))
+            if 'bathymetry' in bh_df.columns:
+                b_val = bh_df['bathymetry'].iloc[0]
+                if pd.notna(b_val):
+                    bath_points.append((cum_dist[bh], b_val))
             
     # KPI Stats for the profile path
     num_bh_selected = len(st.session_state.custom_profile)
@@ -1063,6 +1113,20 @@ else:
             ),
             row=1, col=col_idx
         )
+        # Add Map Bathymetry line (Green)
+        if bath_points:
+            fig_sub.add_trace(
+                go.Scatter(
+                    x=[p[0] for p in bath_points],
+                    y=[p[1] for p in bath_points],
+                    mode='lines+markers',
+                    line=dict(color='#22c55e' if not is_dark_plot else '#4ade80', width=2.5),
+                    marker=dict(size=6, color='#22c55e'),
+                    name='Map Bathymetry (LAT)',
+                    showlegend=(col_idx == 1)
+                ),
+                row=1, col=col_idx
+            )
         
     # Set tick marks matching the selection path
     tick_vals = [cum_dist[bh] for bh in st.session_state.custom_profile]
@@ -1203,6 +1267,15 @@ else:
                     marker=dict(size=6, color='#3b82f6'),
                     name='Ligging zeebodem (ALAT)'
                 ))
+                if bath_points:
+                    fig63.add_trace(go.Scatter(
+                        x=[p[0] for p in bath_points],
+                        y=[p[1] for p in bath_points],
+                        mode='lines+markers',
+                        line=dict(color='#22c55e' if not is_dark_plot else '#4ade80', width=2.5),
+                        marker=dict(size=6, color='#22c55e'),
+                        name='Map Bathymetry (LAT)'
+                    ))
                 fig63.update_layout(
                     title="<b>Silt/Clay Content (%) – Interpolated</b>",
                     template="plotly_dark" if is_dark_plot else "plotly_white",
@@ -1242,6 +1315,15 @@ else:
                     marker=dict(size=6, color='#3b82f6'),
                     name='Ligging zeebodem (ALAT)'
                 ))
+                if bath_points:
+                    fig_d50.add_trace(go.Scatter(
+                        x=[p[0] for p in bath_points],
+                        y=[p[1] for p in bath_points],
+                        mode='lines+markers',
+                        line=dict(color='#22c55e' if not is_dark_plot else '#4ade80', width=2.5),
+                        marker=dict(size=6, color='#22c55e'),
+                        name='Map Bathymetry (LAT)'
+                    ))
                 fig_d50.update_layout(
                     title="<b>Median Grain Size d50 (mm) – Interpolated</b>",
                     template="plotly_dark" if is_dark_plot else "plotly_white",
@@ -1275,6 +1357,7 @@ else:
     if tbl_rows:
         rows_html = ""
         for row in tbl_rows:
+            bath_str = f"{row['bathymetry']:.2f} m" if pd.notna(row.get('bathymetry')) else "N/A"
             rows_html += f"""
             <tr>
                 <td style="font-weight: 600; color: #4f46e5;">{row['Boornummer']}</td>
@@ -1282,6 +1365,7 @@ else:
                 <td>{row['Tra_van_lat']:.2f} - {row['Tra_tot_lat']:.2f} m</td>
                 <td style="font-weight: 500;">{row['63calculated. met zoutcorrectie']:.2f}%</td>
                 <td style="font-weight: 500;">{row['d50']:.4f} mm</td>
+                <td style="font-weight: 500; color: #16a34a;">{bath_str}</td>
                 <td><span class="badge badge-blue">Layer {row['nummer_diepte']}</span></td>
             </tr>
             """
@@ -1295,6 +1379,7 @@ else:
                     <th>Depth Range (LAT)</th>
                     <th>Silt/Clay Content (%)</th>
                     <th>d50 (mm)</th>
+                    <th>Map Bathymetry</th>
                     <th>Layer Index</th>
                 </tr>
             </thead>
