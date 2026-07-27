@@ -316,17 +316,36 @@ def load_data(uploaded_file, bath_file_bytes=None):
         from rasterio.io import MemoryFile
         import os
 
-        coords = list(zip(x_25831, y_25831))
+        # First attempt: reprojected EPSG:25831 coordinates
+        coords_reproj = list(zip(x_25831, y_25831))
+        # Second attempt: direct X, Y coordinates
+        coords_direct = list(zip(df['X'].values, df['Y'].values))
 
+        src_ctx = None
         if bath_file_bytes is not None:
-            with MemoryFile(bath_file_bytes) as memfile:
-                with memfile.open() as src:
-                    nodata = src.nodata
-                    sampled_vals = [val[0] for val in src.sample(coords)]
+            memfile = MemoryFile(bath_file_bytes)
+            src = memfile.open()
         elif os.path.exists("25NZE4376ml9_1.img"):
-            with rasterio.open("25NZE4376ml9_1.img") as src:
-                nodata = src.nodata
-                sampled_vals = [val[0] for val in src.sample(coords)]
+            src = rasterio.open("25NZE4376ml9_1.img")
+        else:
+            src = None
+
+        if src is not None:
+            nodata = src.nodata
+            s_reproj = [val[0] for val in src.sample(coords_reproj)]
+            valid_reproj = [v for v in s_reproj if v is not None and not np.isnan(v) and (nodata is None or not np.isclose(v, nodata)) and -9000 < v < 9000]
+
+            if len(valid_reproj) > 0:
+                sampled_vals = s_reproj
+            else:
+                s_direct = [val[0] for val in src.sample(coords_direct)]
+                valid_direct = [v for v in s_direct if v is not None and not np.isnan(v) and (nodata is None or not np.isclose(v, nodata)) and -9000 < v < 9000]
+                if len(valid_direct) > 0:
+                    sampled_vals = s_direct
+                else:
+                    sampled_vals = s_reproj
+
+            src.close()
         
         if sampled_vals is not None:
             bath_depths = []
@@ -671,6 +690,13 @@ with head_right:
 
 # 7. Sidebar Controls
 st.sidebar.markdown('<div class="sidebar-title">🧭 Profile Settings</div>', unsafe_allow_html=True)
+
+# Bathymetry sampling status
+valid_bath_count = df['bathymetry'].notna().sum() if 'bathymetry' in df.columns else 0
+if valid_bath_count > 0:
+    st.sidebar.caption(f"🟢 **Bathymetry Map (EPSG:25831)**: Active ({valid_bath_count} points sampled)")
+else:
+    st.sidebar.caption("🟡 **Bathymetry Map**: No raster coverage for current file. Upload a matching `.img` / `.tif` map above.")
 
 # Toggle to show value labels on profile bars
 show_labels = st.sidebar.checkbox("🏷️ Show values on plot", value=True)
@@ -1120,8 +1146,8 @@ else:
                     x=[p[0] for p in bath_points],
                     y=[p[1] for p in bath_points],
                     mode='lines+markers',
-                    line=dict(color='#22c55e' if not is_dark_plot else '#4ade80', width=2.5),
-                    marker=dict(size=6, color='#22c55e'),
+                    line=dict(color='#16a34a' if not is_dark_plot else '#4ade80', width=3.5),
+                    marker=dict(symbol='diamond', size=8, color='#16a34a' if not is_dark_plot else '#4ade80', line=dict(width=1, color='white' if is_dark_plot else '#18181b')),
                     name='Map Bathymetry (LAT)',
                     showlegend=(col_idx == 1)
                 ),
@@ -1272,8 +1298,8 @@ else:
                         x=[p[0] for p in bath_points],
                         y=[p[1] for p in bath_points],
                         mode='lines+markers',
-                        line=dict(color='#22c55e' if not is_dark_plot else '#4ade80', width=2.5),
-                        marker=dict(size=6, color='#22c55e'),
+                        line=dict(color='#16a34a' if not is_dark_plot else '#4ade80', width=3.5),
+                        marker=dict(symbol='diamond', size=8, color='#16a34a' if not is_dark_plot else '#4ade80', line=dict(width=1, color='white' if is_dark_plot else '#18181b')),
                         name='Map Bathymetry (LAT)'
                     ))
                 fig63.update_layout(
@@ -1320,8 +1346,8 @@ else:
                         x=[p[0] for p in bath_points],
                         y=[p[1] for p in bath_points],
                         mode='lines+markers',
-                        line=dict(color='#22c55e' if not is_dark_plot else '#4ade80', width=2.5),
-                        marker=dict(size=6, color='#22c55e'),
+                        line=dict(color='#16a34a' if not is_dark_plot else '#4ade80', width=3.5),
+                        marker=dict(symbol='diamond', size=8, color='#16a34a' if not is_dark_plot else '#4ade80', line=dict(width=1, color='white' if is_dark_plot else '#18181b')),
                         name='Map Bathymetry (LAT)'
                     ))
                 fig_d50.update_layout(
