@@ -235,11 +235,12 @@ def get_profile_bathymetry(profile_bh_list, df_coords, bath_file_bytes=None, bat
     return []
 
 @st.cache_data
-def get_bathymetry_mapbox_layer(raster_path_or_bytes, bath_filename=None, max_size=500, colormap='viridis_r'):
+def get_bathymetry_mapbox_layer(raster_path_or_bytes, bath_filename=None, max_size=500, colormap='white_deep_blue'):
     try:
         import rasterio
         from rasterio.io import MemoryFile
         import matplotlib.pyplot as plt
+        from matplotlib.colors import LinearSegmentedColormap
         from PIL import Image
         import base64
         import io
@@ -303,9 +304,15 @@ def get_bathymetry_mapbox_layer(raster_path_or_bytes, bath_filename=None, max_si
 
         src.close()
 
-        # Apply colormap to depth data
+        # Apply colormap to depth data (white shallow -> deep blue deep)
         norm = plt.Normalize(vmin=vmin, vmax=vmax)
-        cmap_func = plt.colormaps.get_cmap(colormap)
+        if colormap in ['white_deep_blue', 'white_to_blue', 'viridis_r']:
+            cmap_func = LinearSegmentedColormap.from_list(
+                "white_deep_blue", 
+                ["#ffffff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"]
+            )
+        else:
+            cmap_func = plt.colormaps.get_cmap(colormap)
         colored = cmap_func(norm(depth_data))  # RGBA float in [0,1]
 
         # Apply transparency to nodata pixels
@@ -1258,7 +1265,13 @@ if use_bath_map and bath_raster_available:
                 z=b_depths,
                 radius=16,
                 opacity=0.65,
-                colorscale="Viridis",
+                colorscale=[
+                    [0.0, "#ffffff"],
+                    [0.25, "#c6dbef"],
+                    [0.50, "#6baed6"],
+                    [0.75, "#2171b5"],
+                    [1.00, "#08306b"]
+                ],
                 colorbar=dict(
                     title="Bathymetry (m)",
                     x=-0.08,
@@ -1343,7 +1356,7 @@ if use_bath_map and bath_raster_available:
         b64_bath, coords_bath = get_bathymetry_mapbox_layer(
             uploaded_bath_file.getvalue() if uploaded_bath_file is not None else "25NZE4376ml9_1.img",
             bath_filename=uploaded_bath_file.name if uploaded_bath_file is not None else None,
-            colormap='viridis_r'
+            colormap='white_deep_blue'
         )
         if b64_bath and coords_bath:
             mapbox_layers.append({
