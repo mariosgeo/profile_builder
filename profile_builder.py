@@ -1329,10 +1329,11 @@ else:
         if not bh_df.empty:
             bottom_points.append((cum_dist[bh], bh_df['Tra_tot_lat'].max()))
 
-    if bath_points:
+    if bath_points and len(bath_points) > 0:
         top_points = bath_points
         is_bath_top = True
     else:
+        st.warning("⚠️ **Bathymetry Map Out of Bounds**: The selected borehole coordinates fall outside the bathymetry map coverage area. Using top surface elevation values from the Excel file.")
         top_points = []
         for bh in st.session_state.custom_profile:
             bh_df = prof_df[prof_df['Boornummer'] == bh]
