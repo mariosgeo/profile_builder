@@ -1907,6 +1907,25 @@ if show_depth_maps:
                 horizontal_spacing=0.08
             )
 
+            # ── All boreholes not at this depth → grey reference dots ─────────
+            bh_at_depth = set(sel['Boornummer'].unique())
+            missing_bh = df_coords[~df_coords['Boornummer'].isin(bh_at_depth)]
+            if not missing_bh.empty:
+                for col_idx in [1, 2]:
+                    fig_depth.add_trace(
+                        go.Scatter(
+                            x=missing_bh['X'],
+                            y=missing_bh['Y'],
+                            mode='markers',
+                            marker=dict(size=8, color='#d4d4d4', symbol='circle', line=dict(color='#a3a3a3', width=0.5)),
+                            name='No data at this depth' if col_idx == 1 else '',
+                            showlegend=(col_idx == 1),
+                            hovertext=[f"Borehole: {bh}<br>(no layer at this depth)" for bh in missing_bh['Boornummer']],
+                            hoverinfo='text',
+                        ),
+                        row=1, col=col_idx
+                    )
+
             # ── Left: Silt/Clay (%<0.063mm) ──────────────────────────────────
             valid_63 = sel[sel['63calculated. met zoutcorrectie'].notna()]
             nan_63 = sel[sel['63calculated. met zoutcorrectie'].isna()]
