@@ -1311,12 +1311,12 @@ marker_texts  = []
 for bh in df_coords['Boornummer']:
     if bh in profile_set:
         seq = profile_set[bh] + 1            # 1-based sequence number
-        marker_colors.append('#ef4444')      # red = in profile
-        marker_sizes.append(18)
+        marker_colors.append('#dc2626')      # red = selected in profile path sequence
+        marker_sizes.append(16)
         marker_texts.append(f"<b>{seq}</b>")
     else:
-        marker_colors.append('#4f46e5' if not IS_DARK else '#818cf8')
-        marker_sizes.append(11)
+        marker_colors.append('#22c55e')      # green dot for all available boreholes
+        marker_sizes.append(10)
         marker_texts.append(bh)              # show name for unselected
 
 # ── Borehole Markers trace (rendered ON TOP of bathymetry & profile lines) ───
