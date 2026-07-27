@@ -623,21 +623,38 @@ def load_data(uploaded_file, bath_file_bytes=None):
 
     return df
 
-col_up1, col_up2 = st.columns([2, 1])
+# 4. Data Ingestion & Upload Section
+col_up1, col_up2 = st.columns([1.8, 1.2])
 with col_up1:
-    uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
+    uploaded_file = st.file_uploader("📂 Upload Borehole Excel File (.xlsx)", type=["xlsx"])
 with col_up2:
-    uploaded_bath_file = st.file_uploader("Optional: Bathymetry Map (.img / .tif)", type=["img", "tif", "geotiff"])
+    use_bath_map = st.checkbox("🗺️ Enable Bathymetry Map Mode", value=True, help="Uncheck to disable bathymetry map sampling and use Excel borehole top elevations directly.")
+    if use_bath_map:
+        uploaded_bath_file = st.file_uploader("Optional Custom Bathymetry Map (.img / .tif)", type=["img", "tif", "geotiff"])
+    else:
+        uploaded_bath_file = None
 
-if uploaded_file is not None:
-    try:
-        bath_bytes = uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None
-        df = load_data(uploaded_file, bath_file_bytes=bath_bytes)
-    except Exception as e:
-        st.error(f"Failed to load data: {e}")
-        st.stop()
-else:
-    st.info("Please upload an Excel file to get started.")
+# Require Excel file to be uploaded before plotting
+if uploaded_file is None:
+    st.info("👋 **Welcome to Borehole Profile Builder!** Please upload your Borehole Excel file (`.xlsx`) above to get started.")
+    st.stop()
+
+# Verify Bathymetry Raster availability when Bathymetry Mode is enabled
+import os
+bath_raster_available = False
+if use_bath_map:
+    if uploaded_bath_file is not None:
+        bath_raster_available = True
+    elif os.path.exists("25NZE4376ml9_1.img"):
+        bath_raster_available = True
+    else:
+        st.info("ℹ️ **Bathymetry Map Not Provided**: Bathymetry mode is enabled, but no custom `.img` / `.tif` map was uploaded and default `25NZE4376ml9_1.img` was not found. Please upload a bathymetry map file above, or uncheck Bathymetry Mode.")
+
+try:
+    bath_bytes = uploaded_bath_file.getvalue() if (use_bath_map and uploaded_bath_file is not None) else None
+    df = load_data(uploaded_file, bath_file_bytes=bath_bytes if bath_raster_available else None)
+except Exception as e:
+    st.error(f"Failed to load Excel dataset: {e}")
     st.stop()
 
 # 5. Extract Unique Coordinates and Boreholes
@@ -1145,34 +1162,35 @@ for bh in st.session_state.custom_profile:
 # 8. Row 1: Interactive Map
 fig_map = go.Figure()
 
-# Add Bathymetry Surface Layer FIRST so markers sit cleanly on top
-try:
-    b_lats, b_lons, b_depths = get_bathymetry_mapbox_points(
-        uploaded_bath_file.getvalue() if uploaded_bath_file is not None else "25NZE4376ml9_1.img",
-        bath_filename=uploaded_bath_file.name if uploaded_bath_file is not None else None,
-        grid_size=45
-    )
-    if b_lats and b_lons and b_depths:
-        fig_map.add_trace(go.Densitymapbox(
-            lat=b_lats,
-            lon=b_lons,
-            z=b_depths,
-            radius=16,
-            opacity=0.65,
-            colorscale="Viridis",
-            colorbar=dict(
-                title="Bathymetry (m)",
-                x=-0.08,
-                len=0.7,
-                thickness=12,
-                title_font=dict(size=11),
-                tickfont=dict(size=10)
-            ),
-            hovertemplate="Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<br>Bathymetry Depth: %{z:.2f} m (LAT)<extra>Bathymetry Map</extra>",
-            name="Bathymetry Map"
-        ))
-except Exception:
-    pass
+# Add Bathymetry Surface Layer FIRST if Bathymetry Map Mode is enabled and raster is available
+if use_bath_map and bath_raster_available:
+    try:
+        b_lats, b_lons, b_depths = get_bathymetry_mapbox_points(
+            uploaded_bath_file.getvalue() if uploaded_bath_file is not None else "25NZE4376ml9_1.img",
+            bath_filename=uploaded_bath_file.name if uploaded_bath_file is not None else None,
+            grid_size=45
+        )
+        if b_lats and b_lons and b_depths:
+            fig_map.add_trace(go.Densitymapbox(
+                lat=b_lats,
+                lon=b_lons,
+                z=b_depths,
+                radius=16,
+                opacity=0.65,
+                colorscale="Viridis",
+                colorbar=dict(
+                    title="Bathymetry (m)",
+                    x=-0.08,
+                    len=0.7,
+                    thickness=12,
+                    title_font=dict(size=11),
+                    tickfont=dict(size=10)
+                ),
+                hovertemplate="Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<br>Bathymetry Depth: %{z:.2f} m (LAT)<extra>Bathymetry Map</extra>",
+                name="Bathymetry Map"
+            ))
+    except Exception:
+        pass
 
 # ── Build per-marker colour / size / text arrays ──────────────────────────────
 # Encode selection order directly in the main trace so there is only ONE
@@ -1239,21 +1257,22 @@ if len(st.session_state.custom_profile) >= 2:
 
 # Generate Bathymetry Mapbox Layer overlay
 mapbox_layers = []
-try:
-    b64_bath, coords_bath = get_bathymetry_mapbox_layer(
-        uploaded_bath_file.getvalue() if uploaded_bath_file is not None else "25NZE4376ml9_1.img",
-        bath_filename=uploaded_bath_file.name if uploaded_bath_file is not None else None,
-        colormap='viridis_r'
-    )
-    if b64_bath and coords_bath:
-        mapbox_layers.append({
-            "sourcetype": "image",
-            "source": b64_bath,
-            "coordinates": coords_bath,
-            "opacity": 0.65
-        })
-except Exception:
-    pass
+if use_bath_map and bath_raster_available:
+    try:
+        b64_bath, coords_bath = get_bathymetry_mapbox_layer(
+            uploaded_bath_file.getvalue() if uploaded_bath_file is not None else "25NZE4376ml9_1.img",
+            bath_filename=uploaded_bath_file.name if uploaded_bath_file is not None else None,
+            colormap='viridis_r'
+        )
+        if b64_bath and coords_bath:
+            mapbox_layers.append({
+                "sourcetype": "image",
+                "source": b64_bath,
+                "coordinates": coords_bath,
+                "opacity": 0.65
+            })
+    except Exception:
+        pass
 
 fig_map.update_layout(
     mapbox=dict(
@@ -1311,17 +1330,19 @@ else:
     bottoms = prof_df['Tra_van_lat']
     
     # Create text columns for labels inside the plot
-    prof_df['63calculated_text'] = prof_df['63calculated. met zoutcorrectie'].apply(lambda v: f"{v:.1f}%")
-    prof_df['d50_text'] = prof_df['d50'].apply(lambda v: f"{v:.3f}")
+    prof_df['63calculated_text'] = prof_df['63calculated. met zoutcorrectie'].apply(lambda v: f"{v:.2f}%")
+    prof_df['d50_text'] = prof_df['d50'].apply(lambda v: f"{v:.2f}")
     
-    # ── 1. Top Surface (LAT) from continuous map bathymetry ──────────────────
-    bath_points = get_profile_bathymetry(
-        st.session_state.custom_profile,
-        df_coords,
-        bath_file_bytes=uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None,
-        bath_filename=uploaded_bath_file.name if uploaded_bath_file is not None else None,
-        step_m=min(interp_dx, 1.0)
-    )
+    # ── 1. Top Surface (ALAT) calculation ───────────────────────────────────
+    bath_points = []
+    if use_bath_map and bath_raster_available:
+        bath_points = get_profile_bathymetry(
+            st.session_state.custom_profile,
+            df_coords,
+            bath_file_bytes=uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None,
+            bath_filename=uploaded_bath_file.name if uploaded_bath_file is not None else None,
+            step_m=min(interp_dx, 1.0)
+        )
 
     bottom_points = []
     for bh in st.session_state.custom_profile:
@@ -1329,11 +1350,12 @@ else:
         if not bh_df.empty:
             bottom_points.append((cum_dist[bh], bh_df['Tra_tot_lat'].max()))
 
-    if bath_points and len(bath_points) > 0:
+    if use_bath_map and bath_raster_available and bath_points and len(bath_points) > 0:
         top_points = bath_points
         is_bath_top = True
     else:
-        st.warning("⚠️ **Bathymetry Map Out of Bounds**: The selected borehole coordinates fall outside the bathymetry map coverage area. Using top surface elevation values from the Excel file.")
+        if use_bath_map:
+            st.warning("⚠️ **Bathymetry Map Out of Bounds**: The selected borehole coordinates fall outside the bathymetry map coverage area. Using top surface elevation values from the Excel file.")
         top_points = []
         for bh in st.session_state.custom_profile:
             bh_df = prof_df[prof_df['Boornummer'] == bh]
@@ -1355,7 +1377,7 @@ else:
     with col3:
         st.markdown(f'<div class="metric-card"><div class="metric-label">Average Silt/Clay</div><div class="metric-value">{mean_63:.2f} %</div></div>', unsafe_allow_html=True)
     with col4:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">Average d50</div><div class="metric-value">{mean_d50:.4f} mm</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-label">Average d50</div><div class="metric-value">{mean_d50:.2f} mm</div></div>', unsafe_allow_html=True)
 
     # 11. Plotly Subplots configuration
     fig_sub = make_subplots(
@@ -1393,7 +1415,7 @@ else:
                 f"Borehole: {row['Boornummer']}<br>"
                 f"Depth: {row['Tra_van_lat']:.2f} - {row['Tra_tot_lat']:.2f} m<br>"
                 f"Silt/Clay: {row['63calculated. met zoutcorrectie']:.2f}%<br>"
-                f"d50: {row['d50']:.4f} mm"
+                f"d50: {row['d50']:.2f} mm"
                 for _, row in prof_df.iterrows()
             ],
             showlegend=False
@@ -1426,7 +1448,7 @@ else:
                 f"Borehole: {row['Boornummer']}<br>"
                 f"Depth: {row['Tra_van_lat']:.2f} - {row['Tra_tot_lat']:.2f} m<br>"
                 f"Silt/Clay: {row['63calculated. met zoutcorrectie']:.2f}%<br>"
-                f"d50: {row['d50']:.4f} mm"
+                f"d50: {row['d50']:.2f} mm"
                 for _, row in prof_df.iterrows()
             ],
             showlegend=False
@@ -1626,7 +1648,7 @@ else:
                     zmax=cmax_d50,
                     colorbar=cb_d50_heat,
                     connectgaps=False,
-                    hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>d50: %{z:.4f} mm<extra></extra>",
+                    hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>d50: %{z:.2f} mm<extra></extra>",
                 ))
                 fig_d50.add_trace(go.Scatter(
                     x=top_x, y=top_y,
