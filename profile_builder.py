@@ -1443,8 +1443,8 @@ else:
                 mode='lines' if is_bath_top else 'lines+markers',
                 line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2.5),
                 marker=dict(size=6, color='#ef4444') if not is_bath_top else None,
-                hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Top Surface (LAT)</extra>",
-                name='Top Surface (LAT)',
+                hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Ligging zeebodem (ALAT)</extra>",
+                name='Ligging zeebodem (ALAT)',
                 showlegend=(col_idx == 1)  # Only show once in the legend
             ),
             row=1, col=col_idx
@@ -1593,15 +1593,15 @@ else:
                     mode='lines' if is_bath_top else 'lines+markers',
                     line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2.5),
                     marker=dict(size=6, color='#ef4444') if not is_bath_top else None,
-                    hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Top Surface (LAT)</extra>",
-                    name='Top Surface (LAT)'
+                    hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Ligging zeebodem (ALAT)</extra>",
+                    name='Ligging zeebodem (ALAT)'
                 ))
                 fig63.add_trace(go.Scatter(
                     x=bot_x, y=bot_y,
                     mode='lines+markers',
                     line=dict(color='#3b82f6' if not is_dark_plot else '#93c5fd', width=2, dash='dash'),
                     marker=dict(size=6, color='#3b82f6'),
-                    name='Ligging zeebodem (ALAT)'
+                    name='Borehole Bottom (LAT)'
                 ))
                 fig63.update_layout(
                     title="<b>Silt/Clay Content (%) – Interpolated</b>",
@@ -1633,15 +1633,15 @@ else:
                     mode='lines' if is_bath_top else 'lines+markers',
                     line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2.5),
                     marker=dict(size=6, color='#ef4444') if not is_bath_top else None,
-                    hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Top Surface (LAT)</extra>",
-                    name='Top Surface (LAT)'
+                    hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Ligging zeebodem (ALAT)</extra>",
+                    name='Ligging zeebodem (ALAT)'
                 ))
                 fig_d50.add_trace(go.Scatter(
                     x=bot_x, y=bot_y,
                     mode='lines+markers',
                     line=dict(color='#3b82f6' if not is_dark_plot else '#93c5fd', width=2, dash='dash'),
                     marker=dict(size=6, color='#3b82f6'),
-                    name='Ligging zeebodem (ALAT)'
+                    name='Borehole Bottom (LAT)'
                 ))
                 fig_d50.update_layout(
                     title="<b>Median Grain Size d50 (mm) – Interpolated</b>",
