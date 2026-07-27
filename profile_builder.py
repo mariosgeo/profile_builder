@@ -25,8 +25,8 @@ HEX_COLORS = [
     '#800000'   # Dark maroon/red (top)
 ]
 
-SILT_BINS = [0, 1, 2, 4, 6, 8, 10, 20, 50]
-D50_BINS = [0, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.6, 10]
+SILT_BINS = [0, 1, 2, 4, 6, 8, 10, 20, 25]
+D50_BINS = [0, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.6, 1]
 
 def hex_to_rgb(hex_str):
     hex_str = hex_str.lstrip('#')
@@ -1036,7 +1036,7 @@ is_dark_plot = IS_DARK and not force_white_plots
 bar_width = st.sidebar.slider(
     "📏 Borehole Bar Width (m)",
     min_value=10,
-    max_value=150,
+    max_value=250,
     value=50,
     step=5,
 )
@@ -1477,7 +1477,7 @@ else:
         shared_yaxes=True, 
         horizontal_spacing=0.04,
         subplot_titles=(
-            "<b>Percentage Content (%) < 0.063mm </b><br>", 
+            "<b>Percentage (%) < 0.063mm </b><br>", 
             "<b>d50 (mm)</b><br>"
         )
     )
@@ -1580,7 +1580,7 @@ else:
                 mode='lines+markers',
                 line=dict(color='#3b82f6' if not is_dark_plot else '#93c5fd', width=2, dash='dash'),
                 marker=dict(size=6, color='#3b82f6'),
-                name='Borehole Bottom (LAT)',
+                name='Einddiepte boring (ALAT)',
                 showlegend=(col_idx == 1)
             ),
             row=1, col=col_idx
@@ -1758,7 +1758,7 @@ else:
                     mode='lines+markers',
                     line=dict(color='#3b82f6' if not is_dark_plot else '#93c5fd', width=2, dash='dash'),
                     marker=dict(size=6, color='#3b82f6'),
-                    name='Borehole Bottom (LAT)'
+                    name='Einddiepte boring (ALAT)'
                 ))
                 fig63.update_layout(
                     title="<b>Silt/Clay Content (%) – Interpolated</b>",
@@ -1800,7 +1800,7 @@ else:
                     mode='lines+markers',
                     line=dict(color='#3b82f6' if not is_dark_plot else '#93c5fd', width=2, dash='dash'),
                     marker=dict(size=6, color='#3b82f6'),
-                    name='Borehole Bottom (LAT)'
+                    name='Einddiepte boring (ALAT)'
                 ))
                 fig_d50.update_layout(
                     title="<b>Median Grain Size d50 (mm) – Interpolated</b>",
