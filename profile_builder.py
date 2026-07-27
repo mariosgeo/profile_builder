@@ -1865,7 +1865,7 @@ show_depth_maps = st.checkbox("🗺️ Show Depth-Slice Maps", value=False, help
 if show_depth_maps:
     # Compute MID_LAT (midpoint depth of each layer)
     df_maps = df.copy()
-    df_maps['MID_LAT'] = (df_maps['Tra_van_lat'] + df_maps['Tra_tot_lat']) / 2.0
+    df_maps['MID_LAT'] = np.round((df_maps['Tra_van_lat'] + df_maps['Tra_tot_lat']) / 2.0,0)
     depths = np.sort(df_maps['MID_LAT'].dropna().unique())
 
     if len(depths) == 0:
