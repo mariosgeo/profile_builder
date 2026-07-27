@@ -1373,9 +1373,9 @@ fig_map.update_layout(
         center=dict(lat=df_coords['lat'].mean(), lon=df_coords['lon'].mean()),
         zoom=map_zoom_level,
         layers=mapbox_layers,
-        uirevision=f"keep_zoom_{map_zoom_level}"
+        uirevision="fixed_map_ui"
     ),
-    uirevision=f"keep_zoom_{map_zoom_level}",
+    uirevision="fixed_map_ui",
     clickmode='event+select',
     margin=dict(l=0, r=0, t=0, b=0),
     height=400,
