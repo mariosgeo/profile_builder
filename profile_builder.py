@@ -184,12 +184,19 @@ def get_profile_bathymetry(profile_bh_list, df_coords, bath_file_bytes=None, bat
             src.close()
 
         if sampled is not None:
-            bath_points = []
+            valid_d = []
+            valid_depth = []
             for d, v in zip(dist_arr, sampled):
                 if v is not None and not np.isnan(v) and (nodata is None or not np.isclose(v, nodata)) and -9000 < v < 9000:
-                    depth = abs(v) if v < 0 else v
-                    bath_points.append((float(d), float(depth)))
-            return bath_points
+                    valid_d.append(float(d))
+                    valid_depth.append(float(abs(v) if v < 0 else v))
+
+            if len(valid_d) > 0:
+                if len(valid_d) == 1:
+                    interp_depths = np.full_like(dist_arr, valid_depth[0])
+                else:
+                    interp_depths = np.interp(dist_arr, valid_d, valid_depth)
+                return [(float(d), float(dep)) for d, dep in zip(dist_arr, interp_depths)]
     except Exception:
         pass
 
@@ -1029,16 +1036,24 @@ if selected_cmap_63 == 'Custom (Discrete)':
     colorscale_63 = create_discrete_colorscale(SILT_BINS, HEX_COLORS)
     cmin_63 = SILT_BINS[0]
     cmax_63 = SILT_BINS[-1]
+    silt_ticks = [f"{b:g}" for b in SILT_BINS]
     colorbar_63 = dict(
         title="Silt/Clay (%)",
         x=0.47,
         thickness=15,
         len=0.85,
         y=0.45,
+        tickmode='array',
         tickvals=SILT_BINS,
-        ticktext=[str(b) for b in SILT_BINS]
+        ticktext=silt_ticks
     )
-    cb_63_heat = dict(title="Silt/Clay (%)", thickness=15, tickvals=SILT_BINS, ticktext=[str(b) for b in SILT_BINS])
+    cb_63_heat = dict(
+        title="Silt/Clay (%)",
+        thickness=15,
+        tickmode='array',
+        tickvals=SILT_BINS,
+        ticktext=silt_ticks
+    )
 else:
     colorscale_63 = selected_cmap_63
     cmin_63 = limits_63[0]
@@ -1056,16 +1071,24 @@ if selected_cmap_d50 == 'Custom (Discrete)':
     colorscale_d50 = create_discrete_colorscale(D50_BINS, HEX_COLORS)
     cmin_d50 = D50_BINS[0]
     cmax_d50 = D50_BINS[-1]
+    d50_ticks = [f"{b:g}" for b in D50_BINS]
     colorbar_d50 = dict(
         title="d50 (mm)",
         x=1.02,
         thickness=15,
         len=0.85,
         y=0.45,
+        tickmode='array',
         tickvals=D50_BINS,
-        ticktext=[str(b) for b in D50_BINS]
+        ticktext=d50_ticks
     )
-    cb_d50_heat = dict(title="d50 (mm)", thickness=15, tickvals=D50_BINS, ticktext=[str(b) for b in D50_BINS])
+    cb_d50_heat = dict(
+        title="d50 (mm)",
+        thickness=15,
+        tickmode='array',
+        tickvals=D50_BINS,
+        ticktext=d50_ticks
+    )
 else:
     colorscale_d50 = selected_cmap_d50
     cmin_d50 = limits_d50[0]
