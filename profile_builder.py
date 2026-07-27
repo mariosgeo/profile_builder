@@ -2086,6 +2086,6 @@ if show_depth_maps:
                 legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
             )
 
-            st.plotly_chart(fig_depth, use_container_width=True)
+            st.plotly_chart(fig_depth, use_container_width=True, key=f"depth_slice_{depth_val}")
 
 st.markdown('</div>', unsafe_allow_html=True)
