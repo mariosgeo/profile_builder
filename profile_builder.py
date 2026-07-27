@@ -995,7 +995,7 @@ else:
     )
     
     fig_sub.update_xaxes(
-        title_text="Distance along profile path (m)",
+        title_text="Lengte langs profiel (m)",
         tickvals=tick_vals,
         ticktext=tick_text,
         tickmode='array',
@@ -1003,7 +1003,7 @@ else:
         row=1, col=1
     )
     fig_sub.update_xaxes(
-        title_text="Distance along profile path (m)",
+        title_text="Lengte langs profiel (m)",
         tickvals=tick_vals,
         ticktext=tick_text,
         tickmode='array',
