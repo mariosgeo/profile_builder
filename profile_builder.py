@@ -285,6 +285,55 @@ def get_bathymetry_mapbox_layer(raster_path_or_bytes, bath_filename=None, max_si
     except Exception:
         return None, None
 
+@st.cache_data
+def get_bathymetry_mapbox_points(raster_path_or_bytes, bath_filename=None, grid_size=40):
+    try:
+        import rasterio
+        from rasterio.io import MemoryFile
+        import os
+
+        src = None
+        if isinstance(raster_path_or_bytes, bytes):
+            fn = bath_filename if bath_filename else "bathymetry.img"
+            memfile = MemoryFile(raster_path_or_bytes, filename=fn)
+            src = memfile.open()
+        elif os.path.exists(str(raster_path_or_bytes)):
+            src = rasterio.open(raster_path_or_bytes)
+            
+        if src is None:
+            return None, None, None
+
+        nodata = src.nodata
+        raster_crs = src.crs if src.crs is not None else "EPSG:25831"
+        
+        bounds = src.bounds
+        xs = np.linspace(bounds.left, bounds.right, grid_size)
+        ys = np.linspace(bounds.bottom, bounds.top, grid_size)
+        grid_x, grid_y = np.meshgrid(xs, ys)
+        
+        flat_x = grid_x.ravel()
+        flat_y = grid_y.ravel()
+        
+        sampled = [v[0] for v in src.sample(list(zip(flat_x, flat_y)))]
+        src.close()
+        
+        to_wgs = Transformer.from_crs(raster_crs, "EPSG:4326", always_xy=True)
+        lons, lats = to_wgs.transform(flat_x, flat_y)
+        
+        valid_lons = []
+        valid_lats = []
+        valid_depths = []
+        
+        for lo, la, v in zip(lons, lats, sampled):
+            if v is not None and not np.isnan(v) and (nodata is None or not np.isclose(v, nodata)) and -9000 < v < 9000:
+                valid_lons.append(float(lo))
+                valid_lats.append(float(la))
+                valid_depths.append(float(abs(v) if v < 0 else v))
+                
+        return valid_lats, valid_lons, valid_depths
+    except Exception:
+        return None, None, None
+
 # 1. Page Configuration
 st.set_page_config(
     page_title="Geotechnical Profile Builder",
@@ -1096,6 +1145,35 @@ for bh in st.session_state.custom_profile:
 # 8. Row 1: Interactive Map
 fig_map = go.Figure()
 
+# Add Bathymetry Surface Layer FIRST so markers sit cleanly on top
+try:
+    b_lats, b_lons, b_depths = get_bathymetry_mapbox_points(
+        uploaded_bath_file.getvalue() if uploaded_bath_file is not None else "25NZE4376ml9_1.img",
+        bath_filename=uploaded_bath_file.name if uploaded_bath_file is not None else None,
+        grid_size=45
+    )
+    if b_lats and b_lons and b_depths:
+        fig_map.add_trace(go.Densitymapbox(
+            lat=b_lats,
+            lon=b_lons,
+            z=b_depths,
+            radius=16,
+            opacity=0.65,
+            colorscale="Viridis",
+            colorbar=dict(
+                title="Bathymetry (m)",
+                x=-0.08,
+                len=0.7,
+                thickness=12,
+                title_font=dict(size=11),
+                tickfont=dict(size=10)
+            ),
+            hovertemplate="Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<br>Bathymetry Depth: %{z:.2f} m (LAT)<extra>Bathymetry Map</extra>",
+            name="Bathymetry Map"
+        ))
+except Exception:
+    pass
+
 # ── Build per-marker colour / size / text arrays ──────────────────────────────
 # Encode selection order directly in the main trace so there is only ONE
 # clickable layer and no overlay trace can block the click event.
@@ -1172,8 +1250,7 @@ try:
             "sourcetype": "image",
             "source": b64_bath,
             "coordinates": coords_bath,
-            "opacity": 0.65,
-            "below": "traces"
+            "opacity": 0.65
         })
 except Exception:
     pass
