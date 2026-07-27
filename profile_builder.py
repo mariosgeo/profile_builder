@@ -1048,12 +1048,12 @@ st.sidebar.markdown('<div class="sidebar-title">🎨 Color Ranges & Palettes</di
 
 # Silt/Clay colormaps
 cmap_options = ['Custom (Discrete)', 'Viridis', 'Plasma', 'Cividis', 'Inferno', 'Magma', 'Turbo', 'Rainbow', 'Spectral_r', 'coolwarm']
-selected_cmap_63 = st.sidebar.selectbox("Silt/Clay Colormap", options=cmap_options, index=0, key="cmap_63")
+selected_cmap_63 = st.sidebar.selectbox("Colormap %<0.063mm", options=cmap_options, index=0, key="cmap_63")
 
 min_63_data = float(df['63calculated. met zoutcorrectie'].min())
 max_63_data = float(df['63calculated. met zoutcorrectie'].max())
 limits_63 = st.sidebar.slider(
-    "Silt/Clay Range (%)",
+    "Bereik %<0.063mm",
     min_value=0.0,
     max_value=50.0,
     value=(min_63_data, max_63_data),
@@ -1084,7 +1084,7 @@ if selected_cmap_63 == 'Custom (Discrete)':
     silt_ticks_vals = [i / n_bins_63 for i in range(n_bins_63 + 1)]
     silt_ticks_text = [f"{b:g}" for b in SILT_BINS]
     colorbar_63 = dict(
-        title="Silt/Clay (%)",
+        title="%<0.063mm",
         x=0.47,
         thickness=15,
         len=0.85,
@@ -1094,7 +1094,7 @@ if selected_cmap_63 == 'Custom (Discrete)':
         ticktext=silt_ticks_text
     )
     cb_63_heat = dict(
-        title="Silt/Clay (%)",
+        title="%<0.063mm",
         thickness=15,
         tickmode='array',
         tickvals=silt_ticks_vals,
@@ -1105,13 +1105,13 @@ else:
     cmin_63 = limits_63[0]
     cmax_63 = limits_63[1]
     colorbar_63 = dict(
-        title="Silt/Clay (%)",
+        title="%<0.063mm",
         x=0.47,
         thickness=15,
         len=0.85,
         y=0.45
     )
-    cb_63_heat = dict(title="Silt/Clay (%)", thickness=15)
+    cb_63_heat = dict(title="%<0.063mm", thickness=15)
 
 if selected_cmap_d50 == 'Custom (Discrete)':
     n_bins_d50 = len(D50_BINS) - 1
@@ -1469,7 +1469,7 @@ else:
     with col2:
         st.markdown(f'<div class="metric-card"><div class="metric-label">Profile Length</div><div class="metric-value">{profile_length:.1f} m</div></div>', unsafe_allow_html=True)
     with col3:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">Average Silt/Clay</div><div class="metric-value">{mean_63:.2f} %</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-label">Gemiddelde %<0.063mm</div><div class="metric-value">{mean_63:.2f} %</div></div>', unsafe_allow_html=True)
     with col4:
         st.markdown(f'<div class="metric-card"><div class="metric-label">Average d50</div><div class="metric-value">{mean_d50:.2f} mm</div></div>', unsafe_allow_html=True)
 
@@ -1516,8 +1516,8 @@ else:
                 hovertext=[
                     f"Borehole: {row['Boornummer']}<br>"
                     f"Depth: {row['Tra_van_lat']:.2f} - {row['Tra_tot_lat']:.2f} m<br>"
-                    f"Silt/Clay: {row['63calculated. met zoutcorrectie']:.2f}%<br>"
-                    f"d50: {row['d50']:.2f} mm" if pd.notna(row.get('d50')) else f"Silt/Clay: {row['63calculated. met zoutcorrectie']:.2f}%"
+                    f"%<0.063mm: {row['63calculated. met zoutcorrectie']:.2f}%<br>"
+                    f"d50: {row['d50']:.2f} mm" if pd.notna(row.get('d50')) else f"%<0.063mm: {row['63calculated. met zoutcorrectie']:.2f}%"
                     for _, row in silt_df.iterrows()
                 ],
                 showlegend=False
@@ -1558,7 +1558,7 @@ else:
                     f"Borehole: {row['Boornummer']}<br>"
                     f"Depth: {row['Tra_van_lat']:.2f} - {row['Tra_tot_lat']:.2f} m<br>"
                     f"d50: {row['d50']:.2f} mm<br>"
-                    f"Silt/Clay: {row['63calculated. met zoutcorrectie']:.2f}%" if pd.notna(row.get('63calculated. met zoutcorrectie')) else f"d50: {row['d50']:.2f} mm"
+                    f"%<0.063mm: {row['63calculated. met zoutcorrectie']:.2f}%" if pd.notna(row.get('63calculated. met zoutcorrectie')) else f"d50: {row['d50']:.2f} mm"
                     for _, row in d50_df.iterrows()
                 ],
                 showlegend=False
@@ -1752,7 +1752,7 @@ else:
                     zmax=cmax_63,
                     colorbar=cb_63_heat,
                     connectgaps=False,
-                    hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>Silt/Clay: %{customdata:.2f}%<extra></extra>" if selected_cmap_63 == 'Custom (Discrete)' else "Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>Silt/Clay: %{z:.2f}%<extra></extra>",
+                    hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>%<0.063mm: %{customdata:.2f}%<extra></extra>" if selected_cmap_63 == 'Custom (Discrete)' else "Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>%<0.063mm: %{z:.2f}%<extra></extra>",
                 ))
                 fig63.add_trace(go.Scatter(
                     x=top_x, y=top_y,
@@ -1770,7 +1770,7 @@ else:
                     name='Einddiepte boring (ALAT)'
                 ))
                 fig63.update_layout(
-                    title="<b>Silt/Clay Content (%) – Interpolated</b>",
+                    title="<b>(%)<0.063mm – geinterpoleerd</b>",
                     template="plotly_dark" if is_dark_plot else "plotly_white",
                     height=420,
                     margin=dict(l=60, r=20, t=60, b=50),
@@ -1812,7 +1812,7 @@ else:
                     name='Einddiepte boring (ALAT)'
                 ))
                 fig_d50.update_layout(
-                    title="<b>Median Grain Size d50 (mm) – Interpolated</b>",
+                    title="<b>d50 (mm) – geinterpoleerd</b>",
                     template="plotly_dark" if is_dark_plot else "plotly_white",
                     height=420,
                     margin=dict(l=60, r=20, t=60, b=50),
