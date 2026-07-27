@@ -1403,11 +1403,30 @@ else:
             step_m=min(interp_dx, 1.0)
         )
 
+    def clean_surface_points(points):
+        if not points:
+            return points
+        xs = np.array([p[0] for p in points])
+        ys = np.array([p[1] for p in points], dtype=np.float64)
+        valid_mask = ~np.isnan(ys)
+        
+        if np.sum(valid_mask) == 0:
+            return [(float(x), 0.0) for x in xs]
+        elif np.sum(valid_mask) == len(ys):
+            return points
+        else:
+            clean_ys = np.interp(xs, xs[valid_mask], ys[valid_mask])
+            return [(float(x), float(y)) for x, y in zip(xs, clean_ys)]
+
     bottom_points = []
     for bh in st.session_state.custom_profile:
         bh_df = prof_df[prof_df['Boornummer'] == bh]
-        if not bh_df.empty:
-            bottom_points.append((cum_dist[bh], bh_df['Tra_tot_lat'].max()))
+        valid_tot = bh_df['Tra_tot_lat'].dropna() if not bh_df.empty else pd.Series()
+        if not valid_tot.empty:
+            bottom_points.append((cum_dist[bh], float(valid_tot.max())))
+        else:
+            bottom_points.append((cum_dist[bh], np.nan))
+    bottom_points = clean_surface_points(bottom_points)
 
     if use_bath_map and bath_raster_available and bath_points and len(bath_points) > 0:
         top_points = bath_points
@@ -1418,8 +1437,12 @@ else:
         top_points = []
         for bh in st.session_state.custom_profile:
             bh_df = prof_df[prof_df['Boornummer'] == bh]
-            if not bh_df.empty:
-                top_points.append((cum_dist[bh], bh_df['Tra_van_lat'].min()))
+            valid_van = bh_df['Tra_van_lat'].dropna() if not bh_df.empty else pd.Series()
+            if not valid_van.empty:
+                top_points.append((cum_dist[bh], float(valid_van.min())))
+            else:
+                top_points.append((cum_dist[bh], np.nan))
+        top_points = clean_surface_points(top_points)
         is_bath_top = False
             
     # KPI Stats for the profile path
@@ -1545,6 +1568,38 @@ else:
             ),
             row=1, col=col_idx
         )
+        
+    # Identify boreholes that have NaN values across all property rows or no depth intervals
+    nan_boreholes = []
+    for bh in st.session_state.custom_profile:
+        bh_df = prof_df[prof_df['Boornummer'] == bh]
+        valid_rows = bh_df[bh_df['Tra_van_lat'].notna() & bh_df['Tra_tot_lat'].notna()]
+        if valid_rows.empty:
+            nan_boreholes.append(bh)
+
+    # Plot placeholder dotted column & text for NaN boreholes on subplots
+    top_map = dict(top_points)
+    bot_map = dict(bottom_points)
+    for bh in nan_boreholes:
+        d_x = cum_dist[bh]
+        t_y = top_map.get(d_x, 10.0)
+        b_y = bot_map.get(d_x, t_y + 5.0)
+        for col_idx in [1, 2]:
+            fig_sub.add_trace(
+                go.Scatter(
+                    x=[d_x, d_x],
+                    y=[t_y, b_y],
+                    mode='lines+text',
+                    line=dict(color='#9ca3af' if not is_dark_plot else '#6b7280', width=1.5, dash='dot'),
+                    text=["", "No Data"],
+                    textposition="middle center",
+                    textfont=dict(size=9, color='#6b7280' if not is_dark_plot else '#9ca3af'),
+                    hoverinfo='text',
+                    hovertext=f"Borehole: {bh}<br>Status: No Data (All NaN)",
+                    showlegend=False
+                ),
+                row=1, col=col_idx
+            )
         
     # Set tick marks matching the selection path
     tick_vals = [cum_dist[bh] for bh in st.session_state.custom_profile]
@@ -1750,48 +1805,4 @@ else:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # 12. Row 3: Raw Details Table
-    st.markdown("### Profile Borehole Layers Data Details")
-    
-    # Fetch data sorted by selected sequence and depth
-    tbl_rows = []
-    for bh in st.session_state.custom_profile:
-        bh_df = df[df['Boornummer'] == bh].sort_values('Tra_van_lat')
-        for _, row in bh_df.iterrows():
-            tbl_rows.append(row)
-            
-    if tbl_rows:
-        rows_html = ""
-        for row in tbl_rows:
-            bath_str = f"{row['bathymetry']:.2f} m" if pd.notna(row.get('bathymetry')) else "N/A"
-            rows_html += f"""
-            <tr>
-                <td style="font-weight: 600; color: #4f46e5;">{row['Boornummer']}</td>
-                <td>{row['monster nummer']}</td>
-                <td>{row['Tra_van_lat']:.2f} - {row['Tra_tot_lat']:.2f} m</td>
-                <td style="font-weight: 500;">{row['63calculated. met zoutcorrectie']:.2f}%</td>
-                <td style="font-weight: 500;">{row['d50']:.4f} mm</td>
-                <td style="font-weight: 500; color: #16a34a;">{bath_str}</td>
-                <td><span class="badge badge-blue">Layer {row['nummer_diepte']}</span></td>
-            </tr>
-            """
-        
-        table_html = f"""
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Borehole</th>
-                    <th>Monster Nummer</th>
-                    <th>Depth Range (LAT)</th>
-                    <th>Silt/Clay Content (%)</th>
-                    <th>d50 (mm)</th>
-                    <th>Map Bathymetry</th>
-                    <th>Layer Index</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-        """
-        st.markdown(table_html, unsafe_allow_html=True)
+
