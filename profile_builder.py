@@ -852,8 +852,8 @@ else:
         shared_yaxes=True, 
         horizontal_spacing=0.04,
         subplot_titles=(
-            "<b>Silt/Clay Content (%)</b><br><sup>Property: 63calculated. met zoutcorrectie</sup>", 
-            "<b>Median Grain Size d50 (mm)</b><br><sup>Property: d50</sup>"
+            "<b>Percentage Content (%) < 0.063mm </b><br>", 
+            "<b>d50 (mm)</b><br>"
         )
     )
     
