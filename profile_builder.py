@@ -1855,4 +1855,237 @@ else:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 12. Depth-Slice Spatial Maps  (inspired by make_maps.ipynb)
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown('<div class="chart-wrap"><div class="chart-header"><div class="chart-title">📍 Depth-Slice Borehole Maps</div><div class="chart-subtitle">Spatial scatter plots of %<0.063mm and d50 at each unique depth level across all boreholes.</div></div>', unsafe_allow_html=True)
 
+show_depth_maps = st.checkbox("🗺️ Show Depth-Slice Maps", value=False, help="Generate one pair of maps per depth level showing spatial distribution of properties.")
+
+if show_depth_maps:
+    # Compute MID_LAT (midpoint depth of each layer)
+    df_maps = df.copy()
+    df_maps['MID_LAT'] = (df_maps['Tra_van_lat'] + df_maps['Tra_tot_lat']) / 2.0
+    depths = np.sort(df_maps['MID_LAT'].dropna().unique())
+
+    if len(depths) == 0:
+        st.warning("No valid depth layers found in the dataset.")
+    else:
+        st.info(f"📊 Generating **{len(depths)}** depth-slice map pairs...")
+
+        # Build Plotly-compatible discrete colorscale for scatter markers
+        n_bins_63_map = len(SILT_BINS) - 1
+        n_bins_d50_map = len(D50_BINS) - 1
+        silt_map_colors = interpolate_colors(HEX_COLORS, n_bins_63_map)
+        d50_map_colors = interpolate_colors(HEX_COLORS, n_bins_d50_map)
+
+        def get_bin_color(val, bins, colors):
+            """Return color for a value based on discrete bins."""
+            if pd.isna(val):
+                return '#999999'
+            for i in range(len(bins) - 1):
+                if val < bins[i + 1]:
+                    return colors[min(i, len(colors) - 1)]
+            return colors[-1]
+
+        for depth_val in depths:
+            sel = df_maps[df_maps['MID_LAT'] == depth_val].dropna(subset=['X', 'Y'])
+            if len(sel) == 0:
+                continue
+
+            depth_lo = depth_val - 0.5
+            depth_hi = depth_val + 0.5
+
+            st.markdown(f'<h4 style="margin-top:1.5rem;">Depth: {depth_lo:.2f} – {depth_hi:.2f} m ALAT</h4>', unsafe_allow_html=True)
+
+            fig_depth = make_subplots(
+                rows=1, cols=2,
+                subplot_titles=(
+                    "<b>%<0.063mm</b>",
+                    "<b>d50 (mm)</b>"
+                ),
+                horizontal_spacing=0.08
+            )
+
+            # ── Left: Silt/Clay (%<0.063mm) ──────────────────────────────────
+            valid_63 = sel[sel['63calculated. met zoutcorrectie'].notna()]
+            nan_63 = sel[sel['63calculated. met zoutcorrectie'].isna()]
+
+            if not valid_63.empty:
+                silt_colors_arr = [get_bin_color(v, SILT_BINS, silt_map_colors) for v in valid_63['63calculated. met zoutcorrectie']]
+                fig_depth.add_trace(
+                    go.Scatter(
+                        x=valid_63['X'],
+                        y=valid_63['Y'],
+                        mode='markers+text',
+                        marker=dict(size=14, color=silt_colors_arr, line=dict(color='black', width=0.5)),
+                        text=[f"{v:.1f}%" for v in valid_63['63calculated. met zoutcorrectie']],
+                        textposition='top center',
+                        textfont=dict(size=9),
+                        hovertext=[
+                            f"Borehole: {row['Boornummer']}<br>%<0.063mm: {row['63calculated. met zoutcorrectie']:.2f}%"
+                            for _, row in valid_63.iterrows()
+                        ],
+                        hoverinfo='text',
+                        showlegend=False,
+                    ),
+                    row=1, col=1
+                )
+
+            if not nan_63.empty:
+                fig_depth.add_trace(
+                    go.Scatter(
+                        x=nan_63['X'],
+                        y=nan_63['Y'],
+                        mode='markers',
+                        marker=dict(size=12, color='#999999', symbol='x', line=dict(color='black', width=0.5)),
+                        name='Missing / NaN',
+                        showlegend=True
+                    ),
+                    row=1, col=1
+                )
+
+            # Check for DINO boreholes
+            dino_sel = pd.DataFrame()
+            if 'DINO' in sel.columns:
+                dino_sel = sel[sel['DINO'] == 1]
+                if not dino_sel.empty:
+                    fig_depth.add_trace(
+                        go.Scatter(
+                            x=dino_sel['X'],
+                            y=dino_sel['Y'],
+                            mode='markers',
+                            marker=dict(size=20, color='rgba(0,0,0,0)', line=dict(color='black', width=2)),
+                            name='DINO Borehole',
+                            showlegend=True,
+                        ),
+                        row=1, col=1
+                    )
+
+            # ── Right: d50 (mm) ───────────────────────────────────────────────
+            valid_d50 = sel[sel['d50'].notna()]
+            nan_d50 = sel[sel['d50'].isna()]
+
+            if not valid_d50.empty:
+                d50_colors_arr = [get_bin_color(v, D50_BINS, d50_map_colors) for v in valid_d50['d50']]
+                fig_depth.add_trace(
+                    go.Scatter(
+                        x=valid_d50['X'],
+                        y=valid_d50['Y'],
+                        mode='markers+text',
+                        marker=dict(size=14, color=d50_colors_arr, line=dict(color='black', width=0.5)),
+                        text=[f"{v:.3f}" for v in valid_d50['d50']],
+                        textposition='top center',
+                        textfont=dict(size=9),
+                        hovertext=[
+                            f"Borehole: {row['Boornummer']}<br>d50: {row['d50']:.3f} mm"
+                            for _, row in valid_d50.iterrows()
+                        ],
+                        hoverinfo='text',
+                        showlegend=False,
+                    ),
+                    row=1, col=2
+                )
+
+            if not nan_d50.empty:
+                fig_depth.add_trace(
+                    go.Scatter(
+                        x=nan_d50['X'],
+                        y=nan_d50['Y'],
+                        mode='markers',
+                        marker=dict(size=12, color='#999999', symbol='x', line=dict(color='black', width=0.5)),
+                        name='Missing / NaN',
+                        showlegend=False,
+                    ),
+                    row=1, col=2
+                )
+
+            if 'DINO' in sel.columns and not dino_sel.empty:
+                fig_depth.add_trace(
+                    go.Scatter(
+                        x=dino_sel['X'],
+                        y=dino_sel['Y'],
+                        mode='markers',
+                        marker=dict(size=20, color='rgba(0,0,0,0)', line=dict(color='black', width=2)),
+                        showlegend=False,
+                    ),
+                    row=1, col=2
+                )
+
+            # ── Discrete colorbar annotations (silt & d50) ───────────────────
+            # Add invisible scatter traces just for the colorbar legend
+            # Silt/Clay colorbar
+            silt_dummy_vals = [(SILT_BINS[i] + SILT_BINS[i+1]) / 2.0 for i in range(n_bins_63_map)]
+            silt_cs_plotly = create_equal_discrete_colorscale(n_bins_63_map, HEX_COLORS)
+            silt_tick_vals_map = [i / n_bins_63_map for i in range(n_bins_63_map + 1)]
+            silt_tick_text_map = [f"{b:g}" for b in SILT_BINS]
+
+            fig_depth.add_trace(
+                go.Scatter(
+                    x=[None], y=[None],
+                    mode='markers',
+                    marker=dict(
+                        size=0.001,
+                        color=[0.5],
+                        colorscale=silt_cs_plotly,
+                        cmin=0, cmax=1,
+                        colorbar=dict(
+                            title="%<0.063mm",
+                            x=0.44, len=0.85, y=0.5, thickness=12,
+                            tickmode='array',
+                            tickvals=silt_tick_vals_map,
+                            ticktext=silt_tick_text_map,
+                        ),
+                        showscale=True,
+                    ),
+                    showlegend=False,
+                    hoverinfo='skip',
+                ),
+                row=1, col=1
+            )
+
+            # d50 colorbar
+            d50_cs_plotly = create_equal_discrete_colorscale(n_bins_d50_map, HEX_COLORS)
+            d50_tick_vals_map = [i / n_bins_d50_map for i in range(n_bins_d50_map + 1)]
+            d50_tick_text_map = [f"{b:g}" for b in D50_BINS]
+
+            fig_depth.add_trace(
+                go.Scatter(
+                    x=[None], y=[None],
+                    mode='markers',
+                    marker=dict(
+                        size=0.001,
+                        color=[0.5],
+                        colorscale=d50_cs_plotly,
+                        cmin=0, cmax=1,
+                        colorbar=dict(
+                            title="d50 (mm)",
+                            x=1.02, len=0.85, y=0.5, thickness=12,
+                            tickmode='array',
+                            tickvals=d50_tick_vals_map,
+                            ticktext=d50_tick_text_map,
+                        ),
+                        showscale=True,
+                    ),
+                    showlegend=False,
+                    hoverinfo='skip',
+                ),
+                row=1, col=2
+            )
+
+            fig_depth.update_layout(
+                template="plotly_dark" if is_dark_plot else "plotly_white",
+                height=500,
+                margin=dict(l=60, r=80, t=60, b=60),
+                paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
+                plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
+                xaxis=dict(title="X Coordinate (UTM)", scaleanchor="y", scaleratio=1),
+                xaxis2=dict(title="X Coordinate (UTM)", scaleanchor="y2", scaleratio=1),
+                yaxis=dict(title="Y Coordinate (UTM)"),
+                yaxis2=dict(title=""),
+                legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
+            )
+
+            st.plotly_chart(fig_depth, use_container_width=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
