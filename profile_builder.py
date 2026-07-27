@@ -766,18 +766,20 @@ def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, pr
     y_arr = np.arange(y_min, y_max + dy, dy)
     nx, ny = len(x_arr), len(y_arr)
 
-    # ── 1. Stamp known borehole layer values ──────────────────────────────
-    # image pixel dtype float32 – OpenCV requires 0-255 uint8 for inpainting;
-    # we normalise, inpaint, then un-normalise.
-    val_min = prof_df[prop_col].min()
-    val_max = prof_df[prop_col].max()
+    # ── 1. Filter out NaN values and stamp known borehole layer values ────
+    valid_prof_df = prof_df[prof_df[prop_col].notna() & prof_df['Tra_van_lat'].notna() & prof_df['Tra_tot_lat'].notna()].copy()
+    if valid_prof_df.empty:
+        return x_arr, y_arr, np.full((ny, nx), np.nan)
+
+    val_min = valid_prof_df[prop_col].min()
+    val_max = valid_prof_df[prop_col].max()
     val_range = val_max - val_min if val_max != val_min else 1.0
 
     img    = np.zeros((ny, nx), dtype=np.float32)   # will hold normalised values
     mask   = np.ones((ny, nx),  dtype=np.uint8) * 255  # 255 = unknown pixel
 
     for bh, dist in cum_dist.items():
-        bh_df = prof_df[prof_df['Boornummer'] == bh]
+        bh_df = valid_prof_df[valid_prof_df['Boornummer'] == bh]
         # nearest x column
         xi = int(round(dist / dx)) if dx > 0 else 0
         xi = max(0, min(xi, nx - 1))
@@ -1482,80 +1484,87 @@ else:
         )
     )
     
-    # Calculate variable bar widths per layer block based on parameter values (analogous to value)
-    silt_norm_vals = map_values_to_equal_bins(prof_df['63calculated. met zoutcorrectie'], SILT_BINS)
-    silt_layer_widths = (0.3 + 0.9 * np.nan_to_num(silt_norm_vals, nan=0.0)) * bar_width
+    # Trace 1: Silt/Clay profile (excluding NaN rows)
+    silt_df = prof_df[prof_df['63calculated. met zoutcorrectie'].notna() & prof_df['Tra_van_lat'].notna() & prof_df['Tra_tot_lat'].notna()].copy()
+    if not silt_df.empty:
+        silt_heights = silt_df['Tra_tot_lat'] - silt_df['Tra_van_lat']
+        silt_bottoms = silt_df['Tra_van_lat']
+        silt_norm_vals = map_values_to_equal_bins(silt_df['63calculated. met zoutcorrectie'], SILT_BINS)
+        silt_layer_widths = (0.3 + 0.9 * np.nan_to_num(silt_norm_vals, nan=0.0)) * bar_width
+        silt_bar_color = silt_norm_vals if selected_cmap_63 == 'Custom (Discrete)' else silt_df['63calculated. met zoutcorrectie']
 
-    d50_norm_vals = map_values_to_equal_bins(prof_df['d50'], D50_BINS)
-    d50_layer_widths = (0.3 + 0.9 * np.nan_to_num(d50_norm_vals, nan=0.0)) * bar_width
-
-    # Trace 1: Silt/Clay profile
-    silt_bar_color = map_values_to_equal_bins(prof_df['63calculated. met zoutcorrectie'], SILT_BINS) if selected_cmap_63 == 'Custom (Discrete)' else prof_df['63calculated. met zoutcorrectie']
-    fig_sub.add_trace(
-        go.Bar(
-            x=prof_df['cum_dist'],
-            y=heights,
-            base=bottoms,
-            width=silt_layer_widths,
-            marker=dict(
-                color=silt_bar_color,
-                colorscale=colorscale_63,
-                cmin=cmin_63,
-                cmax=cmax_63,
-                colorbar=colorbar_63,
-                showscale=True,
-                line=dict(color='rgba(0,0,0,0.15)' if not is_dark_plot else 'rgba(255,255,255,0.15)', width=0.4)
+        fig_sub.add_trace(
+            go.Bar(
+                x=silt_df['cum_dist'],
+                y=silt_heights,
+                base=silt_bottoms,
+                width=silt_layer_widths,
+                marker=dict(
+                    color=silt_bar_color,
+                    colorscale=colorscale_63,
+                    cmin=cmin_63,
+                    cmax=cmax_63,
+                    colorbar=colorbar_63,
+                    showscale=True,
+                    line=dict(color='rgba(0,0,0,0.15)' if not is_dark_plot else 'rgba(255,255,255,0.15)', width=0.4)
+                ),
+                text=silt_df['63calculated_text'] if show_labels else None,
+                textposition='inside',
+                insidetextanchor='middle',
+                textfont=dict(color='white' if is_dark_plot else 'black', size=10),
+                hoverinfo='text',
+                hovertext=[
+                    f"Borehole: {row['Boornummer']}<br>"
+                    f"Depth: {row['Tra_van_lat']:.2f} - {row['Tra_tot_lat']:.2f} m<br>"
+                    f"Silt/Clay: {row['63calculated. met zoutcorrectie']:.2f}%<br>"
+                    f"d50: {row['d50']:.2f} mm" if pd.notna(row.get('d50')) else f"Silt/Clay: {row['63calculated. met zoutcorrectie']:.2f}%"
+                    for _, row in silt_df.iterrows()
+                ],
+                showlegend=False
             ),
-            text=prof_df['63calculated_text'] if show_labels else None,
-            textposition='inside',
-            insidetextanchor='middle',
-            textfont=dict(color='white' if is_dark_plot else 'black', size=10),
-            hoverinfo='text',
-            hovertext=[
-                f"Borehole: {row['Boornummer']}<br>"
-                f"Depth: {row['Tra_van_lat']:.2f} - {row['Tra_tot_lat']:.2f} m<br>"
-                f"Silt/Clay: {row['63calculated. met zoutcorrectie']:.2f}%<br>"
-                f"d50: {row['d50']:.2f} mm"
-                for _, row in prof_df.iterrows()
-            ],
-            showlegend=False
-        ),
-        row=1, col=1
-    )
+            row=1, col=1
+        )
     
-    # Trace 2: d50 profile
-    d50_bar_color = map_values_to_equal_bins(prof_df['d50'], D50_BINS) if selected_cmap_d50 == 'Custom (Discrete)' else prof_df['d50']
-    fig_sub.add_trace(
-        go.Bar(
-            x=prof_df['cum_dist'],
-            y=heights,
-            base=bottoms,
-            width=d50_layer_widths,
-            marker=dict(
-                color=d50_bar_color,
-                colorscale=colorscale_d50,
-                cmin=cmin_d50,
-                cmax=cmax_d50,
-                colorbar=colorbar_d50,
-                showscale=True,
-                line=dict(color='rgba(0,0,0,0.15)' if not is_dark_plot else 'rgba(255,255,255,0.15)', width=0.4)
+    # Trace 2: d50 profile (excluding NaN rows)
+    d50_df = prof_df[prof_df['d50'].notna() & prof_df['Tra_van_lat'].notna() & prof_df['Tra_tot_lat'].notna()].copy()
+    if not d50_df.empty:
+        d50_heights = d50_df['Tra_tot_lat'] - d50_df['Tra_van_lat']
+        d50_bottoms = d50_df['Tra_van_lat']
+        d50_norm_vals = map_values_to_equal_bins(d50_df['d50'], D50_BINS)
+        d50_layer_widths = (0.3 + 0.9 * np.nan_to_num(d50_norm_vals, nan=0.0)) * bar_width
+        d50_bar_color = d50_norm_vals if selected_cmap_d50 == 'Custom (Discrete)' else d50_df['d50']
+
+        fig_sub.add_trace(
+            go.Bar(
+                x=d50_df['cum_dist'],
+                y=d50_heights,
+                base=d50_bottoms,
+                width=d50_layer_widths,
+                marker=dict(
+                    color=d50_bar_color,
+                    colorscale=colorscale_d50,
+                    cmin=cmin_d50,
+                    cmax=cmax_d50,
+                    colorbar=colorbar_d50,
+                    showscale=True,
+                    line=dict(color='rgba(0,0,0,0.15)' if not is_dark_plot else 'rgba(255,255,255,0.15)', width=0.4)
+                ),
+                text=d50_df['d50_text'] if show_labels else None,
+                textposition='inside',
+                insidetextanchor='middle',
+                textfont=dict(color='white' if is_dark_plot else 'black', size=10),
+                hoverinfo='text',
+                hovertext=[
+                    f"Borehole: {row['Boornummer']}<br>"
+                    f"Depth: {row['Tra_van_lat']:.2f} - {row['Tra_tot_lat']:.2f} m<br>"
+                    f"d50: {row['d50']:.2f} mm<br>"
+                    f"Silt/Clay: {row['63calculated. met zoutcorrectie']:.2f}%" if pd.notna(row.get('63calculated. met zoutcorrectie')) else f"d50: {row['d50']:.2f} mm"
+                    for _, row in d50_df.iterrows()
+                ],
+                showlegend=False
             ),
-            text=prof_df['d50_text'] if show_labels else None,
-            textposition='inside',
-            insidetextanchor='middle',
-            textfont=dict(color='white' if is_dark_plot else 'black', size=10),
-            hoverinfo='text',
-            hovertext=[
-                f"Borehole: {row['Boornummer']}<br>"
-                f"Depth: {row['Tra_van_lat']:.2f} - {row['Tra_tot_lat']:.2f} m<br>"
-                f"Silt/Clay: {row['63calculated. met zoutcorrectie']:.2f}%<br>"
-                f"d50: {row['d50']:.2f} mm"
-                for _, row in prof_df.iterrows()
-            ],
-            showlegend=False
-        ),
-        row=1, col=2
-    )
+            row=1, col=2
+        )
     
     # Add Topography Line (connect tops of columns or follow continuous bathymetry)
     for col_idx in [1, 2]:
