@@ -971,12 +971,22 @@ def handle_map_click():
 
     # Collect borehole names from all clicked points across all traces
     for p in points:
+        clicked_bh = None
+        # 1. Try customdata first
         cd = p.get("customdata")
-        if cd is None:
-            continue
-        # customdata can arrive as a scalar or as a 1-element list
-        clicked_bh = cd[0] if isinstance(cd, (list, tuple, np.ndarray)) else cd
-        if clicked_bh in boreholes:
+        if cd is not None:
+            clicked_bh = cd[0] if isinstance(cd, (list, tuple, np.ndarray)) else cd
+
+        # 2. Fallback to lat/lon proximity matching if customdata is missing or from background trace
+        if (not clicked_bh or clicked_bh not in boreholes) and "lat" in p and "lon" in p:
+            c_lat = p["lat"]
+            c_lon = p["lon"]
+            dists = (df_coords['lat'] - c_lat)**2 + (df_coords['lon'] - c_lon)**2
+            min_idx = dists.idxmin()
+            if np.sqrt(dists.loc[min_idx]) < 0.01:
+                clicked_bh = df_coords.loc[min_idx, 'Boornummer']
+
+        if clicked_bh and clicked_bh in boreholes:
             if clicked_bh not in st.session_state.custom_profile:
                 st.session_state.custom_profile.append(clicked_bh)
             else:
@@ -1245,7 +1255,7 @@ if use_bath_map and bath_raster_available:
                     title_font=dict(size=11),
                     tickfont=dict(size=10)
                 ),
-                hovertemplate="Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<br>Bathymetry Depth: %{z:.2f} m (LAT)<extra>Bathymetry Map</extra>",
+                hoverinfo='skip',
                 name="Bathymetry Map"
             ))
     except Exception:
