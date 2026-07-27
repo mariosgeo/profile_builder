@@ -1065,11 +1065,12 @@ limits_d50 = st.sidebar.slider(
 
 # Configure active colorscales, limits, and colorbars
 if selected_cmap_63 == 'Custom (Discrete)':
-    colorscale_63 = create_discrete_colorscale(SILT_BINS, HEX_COLORS)
-    cmin_63 = float(SILT_BINS[0])
-    cmax_63 = float(SILT_BINS[-1])
-    silt_ticks_vals = [0, 2, 6, 10, 20, 50]
-    silt_ticks_text = [f"{b:g}" for b in silt_ticks_vals]
+    n_bins_63 = len(SILT_BINS) - 1
+    colorscale_63 = create_equal_discrete_colorscale(n_bins_63, HEX_COLORS)
+    cmin_63 = 0.0
+    cmax_63 = 1.0
+    silt_ticks_vals = [i / n_bins_63 for i in range(n_bins_63 + 1)]
+    silt_ticks_text = [f"{b:g}" for b in SILT_BINS]
     colorbar_63 = dict(
         title="Silt/Clay (%)",
         x=0.47,
@@ -1101,11 +1102,12 @@ else:
     cb_63_heat = dict(title="Silt/Clay (%)", thickness=15)
 
 if selected_cmap_d50 == 'Custom (Discrete)':
-    colorscale_d50 = create_discrete_colorscale(D50_BINS, HEX_COLORS)
-    cmin_d50 = float(D50_BINS[0])
-    cmax_d50 = float(D50_BINS[-1])
-    d50_ticks_vals = [0, 0.2, 0.4, 0.6, 10]
-    d50_ticks_text = [f"{b:g}" for b in d50_ticks_vals]
+    n_bins_d50 = len(D50_BINS) - 1
+    colorscale_d50 = create_equal_discrete_colorscale(n_bins_d50, HEX_COLORS)
+    cmin_d50 = 0.0
+    cmax_d50 = 1.0
+    d50_ticks_vals = [i / n_bins_d50 for i in range(n_bins_d50 + 1)]
+    d50_ticks_text = [f"{b:g}" for b in D50_BINS]
     colorbar_d50 = dict(
         title="d50 (mm)",
         x=1.02,
@@ -1471,6 +1473,7 @@ else:
     )
     
     # Trace 1: Silt/Clay profile
+    silt_bar_color = map_values_to_equal_bins(prof_df['63calculated. met zoutcorrectie'], SILT_BINS) if selected_cmap_63 == 'Custom (Discrete)' else prof_df['63calculated. met zoutcorrectie']
     fig_sub.add_trace(
         go.Bar(
             x=prof_df['cum_dist'],
@@ -1478,7 +1481,7 @@ else:
             base=bottoms,
             width=bar_width,
             marker=dict(
-                color=prof_df['63calculated. met zoutcorrectie'],
+                color=silt_bar_color,
                 colorscale=colorscale_63,
                 cmin=cmin_63,
                 cmax=cmax_63,
@@ -1504,6 +1507,7 @@ else:
     )
     
     # Trace 2: d50 profile
+    d50_bar_color = map_values_to_equal_bins(prof_df['d50'], D50_BINS) if selected_cmap_d50 == 'Custom (Discrete)' else prof_df['d50']
     fig_sub.add_trace(
         go.Bar(
             x=prof_df['cum_dist'],
@@ -1511,7 +1515,7 @@ else:
             base=bottoms,
             width=bar_width,
             marker=dict(
-                color=prof_df['d50'],
+                color=d50_bar_color,
                 colorscale=colorscale_d50,
                 cmin=cmin_d50,
                 cmax=cmax_d50,
@@ -1710,17 +1714,19 @@ else:
                 )
 
                 # ── Silt / Clay heatmap ───────────────────────────────────────
+                z_63_plot = map_values_to_equal_bins(grid63, SILT_BINS) if selected_cmap_63 == 'Custom (Discrete)' else grid63
                 fig63 = go.Figure()
                 fig63.add_trace(go.Heatmap(
-                    z=grid63,
+                    z=z_63_plot,
                     x=x63,
                     y=y63,
+                    customdata=grid63,
                     colorscale=colorscale_63,
                     zmin=cmin_63,
                     zmax=cmax_63,
                     colorbar=cb_63_heat,
                     connectgaps=False,
-                    hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>Silt/Clay: %{z:.2f}%<extra></extra>",
+                    hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>Silt/Clay: %{customdata:.2f}%<extra></extra>" if selected_cmap_63 == 'Custom (Discrete)' else "Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>Silt/Clay: %{z:.2f}%<extra></extra>",
                 ))
                 fig63.add_trace(go.Scatter(
                     x=top_x, y=top_y,
@@ -1750,17 +1756,19 @@ else:
                 )
 
                 # ── d50 heatmap ───────────────────────────────────────────────
+                z_d50_plot = map_values_to_equal_bins(gridd50, D50_BINS) if selected_cmap_d50 == 'Custom (Discrete)' else gridd50
                 fig_d50 = go.Figure()
                 fig_d50.add_trace(go.Heatmap(
-                    z=gridd50,
+                    z=z_d50_plot,
                     x=xd50,
                     y=yd50,
+                    customdata=gridd50,
                     colorscale=colorscale_d50,
                     zmin=cmin_d50,
                     zmax=cmax_d50,
                     colorbar=cb_d50_heat,
                     connectgaps=False,
-                    hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>d50: %{z:.2f} mm<extra></extra>",
+                    hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>d50: %{customdata:.2f} mm<extra></extra>" if selected_cmap_d50 == 'Custom (Discrete)' else "Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>d50: %{z:.2f} mm<extra></extra>",
                 ))
                 fig_d50.add_trace(go.Scatter(
                     x=top_x, y=top_y,
