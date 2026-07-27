@@ -1286,9 +1286,22 @@ if use_bath_map and bath_raster_available:
     except Exception:
         pass
 
+# Profile path line (rendered below borehole markers)
+if len(st.session_state.custom_profile) >= 2:
+    prof_coords = []
+    for bh in st.session_state.custom_profile:
+        r = df_coords[df_coords['Boornummer'] == bh].iloc[0]
+        prof_coords.append((r['lat'], r['lon']))
+    fig_map.add_trace(go.Scattermapbox(
+        lat=[p[0] for p in prof_coords],
+        lon=[p[1] for p in prof_coords],
+        mode='lines',
+        line=dict(color='#ef4444', width=2),
+        hoverinfo='skip',
+        name='Profile Path',
+    ))
+
 # ── Build per-marker colour / size / text arrays ──────────────────────────────
-# Encode selection order directly in the main trace so there is only ONE
-# clickable layer and no overlay trace can block the click event.
 profile_set = {bh: i for i, bh in enumerate(st.session_state.custom_profile)}
 
 marker_colors = []
@@ -1306,7 +1319,7 @@ for bh in df_coords['Boornummer']:
         marker_sizes.append(11)
         marker_texts.append(bh)              # show name for unselected
 
-# ── Single Scattermapbox trace ───────────────────────────────────────────────
+# ── Borehole Markers trace (rendered ON TOP of bathymetry & profile lines) ───
 fig_map.add_trace(go.Scattermapbox(
     lat=df_coords['lat'],
     lon=df_coords['lon'],
@@ -1334,22 +1347,7 @@ fig_map.add_trace(go.Scattermapbox(
     name='All Boreholes',
 ))
 
-# Profile path line (no markers, so cannot intercept clicks)
-if len(st.session_state.custom_profile) >= 2:
-    prof_coords = []
-    for bh in st.session_state.custom_profile:
-        r = df_coords[df_coords['Boornummer'] == bh].iloc[0]
-        prof_coords.append((r['lat'], r['lon']))
-    fig_map.add_trace(go.Scattermapbox(
-        lat=[p[0] for p in prof_coords],
-        lon=[p[1] for p in prof_coords],
-        mode='lines',
-        line=dict(color='#ef4444', width=2),
-        hoverinfo='skip',
-        name='Profile Path',
-    ))
-
-# Generate Bathymetry Mapbox Layer overlay
+# Generate Bathymetry Mapbox Layer overlay (explicitly rendered BELOW traces)
 mapbox_layers = []
 if use_bath_map and bath_raster_available:
     try:
@@ -1363,7 +1361,8 @@ if use_bath_map and bath_raster_available:
                 "sourcetype": "image",
                 "source": b64_bath,
                 "coordinates": coords_bath,
-                "opacity": 0.65
+                "opacity": 0.65,
+                "below": "traces"
             })
     except Exception:
         pass
