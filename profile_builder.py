@@ -1027,6 +1027,16 @@ if valid_bath_count > 0:
 else:
     st.sidebar.caption("🟡 **Bathymetry Map**: No raster coverage for current file. Upload a matching `.img` / `.tif` map above.")
 
+# Map zoom level setting
+map_zoom_level = st.sidebar.slider(
+    "🔍 Map Zoom Level",
+    min_value=7.0,
+    max_value=18.0,
+    value=11.5,
+    step=0.25,
+    help="Adjust default zoom level of the borehole selection map."
+)
+
 # Toggle to show value labels on profile bars
 show_labels = st.sidebar.checkbox("🏷️ Show values on plot", value=True)
 
@@ -1349,7 +1359,7 @@ fig_map.update_layout(
     mapbox=dict(
         style="open-street-map" if not IS_DARK else "carto-darkmatter",
         center=dict(lat=df_coords['lat'].mean(), lon=df_coords['lon'].mean()),
-        zoom=11.5,
+        zoom=map_zoom_level,
         layers=mapbox_layers
     ),
     clickmode='event+select',
@@ -1360,11 +1370,11 @@ fig_map.update_layout(
     plot_bgcolor="rgba(0,0,0,0)",
 )
 
-st.markdown('<div class="chart-wrap"><div class="chart-header"><div class="chart-title">Boreholes Selection Map</div><div class="chart-subtitle">Click points sequentially to build your profile path. Clicking an active sequence point removes it.</div></div>', unsafe_allow_html=True)
+st.markdown('<div class="chart-wrap"><div class="chart-header"><div class="chart-title">Boreholes Selection Map</div><div class="chart-subtitle">Click points sequentially to build your profile path. Use mouse scroll wheel, trackpad pinch, or sidebar slider to zoom in/out.</div></div>', unsafe_allow_html=True)
 st.plotly_chart(
     fig_map, 
     use_container_width=True, 
-    config={"displayModeBar": False}, 
+    config={"displayModeBar": True, "scrollZoom": True}, 
     on_select=handle_map_click, 
     key="map_plot"
 )
