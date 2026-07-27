@@ -73,9 +73,11 @@ def create_discrete_colorscale(bins, hex_colors):
         
     return colorscale
 
-def get_profile_bathymetry(profile_bh_list, df_coords, bath_file_bytes=None, step_m=2.0):
+def get_profile_bathymetry(profile_bh_list, df_coords, bath_file_bytes=None, bath_filename=None, step_m=1.0):
     """
     Samples bathymetry continuously along the polyline connecting profile_bh_list.
+    Dynamically tests candidate CRS transformations (Raster CRS, EPSG:25831, EPSG:32631, EPSG:28992)
+    to guarantee valid sampling regardless of uploaded raster CRS or coordinate system.
     Returns list of (dist, depth) pairs where depth is positive depth below LAT (m).
     """
     if not profile_bh_list or len(profile_bh_list) < 2:
@@ -125,13 +127,8 @@ def get_profile_bathymetry(profile_bh_list, df_coords, bath_file_bytes=None, ste
     except Exception:
         return []
 
-    to_25831 = Transformer.from_crs("EPSG:32631", "EPSG:25831", always_xy=True)
-    line_x25831, line_y25831 = to_25831.transform(line_x, line_y)
-
-    coords_reproj = list(zip(line_x25831, line_y25831))
-    coords_direct = list(zip(line_x, line_y))
-
     sampled = None
+    nodata = None
     try:
         import rasterio
         from rasterio.io import MemoryFile
@@ -139,23 +136,50 @@ def get_profile_bathymetry(profile_bh_list, df_coords, bath_file_bytes=None, ste
 
         src = None
         if bath_file_bytes is not None:
-            memfile = MemoryFile(bath_file_bytes)
+            fn = bath_filename if bath_filename else "bathymetry.img"
+            memfile = MemoryFile(bath_file_bytes, filename=fn)
             src = memfile.open()
         elif os.path.exists("25NZE4376ml9_1.img"):
             src = rasterio.open("25NZE4376ml9_1.img")
 
         if src is not None:
             nodata = src.nodata
-            s_reproj = [v[0] for v in src.sample(coords_reproj)]
-            valid_reproj = [v for v in s_reproj if v is not None and not np.isnan(v) and (nodata is None or not np.isclose(v, nodata)) and -9000 < v < 9000]
+            raster_crs = src.crs
 
-            if len(valid_reproj) > 0:
-                sampled = s_reproj
-            else:
-                s_direct = [v[0] for v in src.sample(coords_direct)]
-                valid_direct = [v for v in s_direct if v is not None and not np.isnan(v) and (nodata is None or not np.isclose(v, nodata)) and -9000 < v < 9000]
-                if len(valid_direct) > 0:
-                    sampled = s_direct
+            coords_candidates = []
+            if raster_crs is not None:
+                try:
+                    to_raster_crs = Transformer.from_crs("EPSG:32631", raster_crs, always_xy=True)
+                    rx, ry = to_raster_crs.transform(line_x, line_y)
+                    coords_candidates.append(list(zip(rx, ry)))
+                except Exception:
+                    pass
+
+            try:
+                to_25831 = Transformer.from_crs("EPSG:32631", "EPSG:25831", always_xy=True)
+                rx, ry = to_25831.transform(line_x, line_y)
+                coords_candidates.append(list(zip(rx, ry)))
+            except Exception:
+                pass
+
+            coords_candidates.append(list(zip(line_x, line_y)))
+
+            try:
+                to_rd = Transformer.from_crs("EPSG:32631", "EPSG:28992", always_xy=True)
+                rx, ry = to_rd.transform(line_x, line_y)
+                coords_candidates.append(list(zip(rx, ry)))
+            except Exception:
+                pass
+
+            for coords in coords_candidates:
+                try:
+                    s_try = [v[0] for v in src.sample(coords)]
+                    valid = [v for v in s_try if v is not None and not np.isnan(v) and (nodata is None or not np.isclose(v, nodata)) and -9000 < v < 9000]
+                    if len(valid) > 0:
+                        sampled = s_try
+                        break
+                except Exception:
+                    continue
 
             src.close()
 
@@ -170,6 +194,96 @@ def get_profile_bathymetry(profile_bh_list, df_coords, bath_file_bytes=None, ste
         pass
 
     return []
+
+@st.cache_data
+def get_bathymetry_mapbox_layer(raster_path_or_bytes, bath_filename=None, max_size=500, colormap='viridis_r'):
+    try:
+        import rasterio
+        from rasterio.io import MemoryFile
+        import matplotlib.pyplot as plt
+        from PIL import Image
+        import base64
+        import io
+        import os
+
+        src = None
+        if isinstance(raster_path_or_bytes, bytes):
+            fn = bath_filename if bath_filename else "bathymetry.img"
+            memfile = MemoryFile(raster_path_or_bytes, filename=fn)
+            src = memfile.open()
+        elif os.path.exists(str(raster_path_or_bytes)):
+            src = rasterio.open(raster_path_or_bytes)
+        
+        if src is None:
+            return None, None
+
+        nodata = src.nodata
+        raster_crs = src.crs if src.crs is not None else "EPSG:25831"
+        data = src.read(1).astype(np.float32)
+
+        # Reproject 4 corner coordinates to EPSG:4326 (WGS84 lon/lat)
+        to_wgs = Transformer.from_crs(raster_crs, "EPSG:4326", always_xy=True)
+        left, bottom, right, top = src.bounds.left, src.bounds.bottom, src.bounds.right, src.bounds.top
+
+        nw_lon, nw_lat = to_wgs.transform(left, top)
+        ne_lon, ne_lat = to_wgs.transform(right, top)
+        se_lon, se_lat = to_wgs.transform(right, bottom)
+        sw_lon, sw_lat = to_wgs.transform(left, bottom)
+
+        coords = [
+            [nw_lon, nw_lat],
+            [ne_lon, ne_lat],
+            [se_lon, se_lat],
+            [sw_lon, sw_lat]
+        ]
+
+        # Mask nodata & invalid values
+        mask = (data == nodata) | np.isnan(data) | (data > 9000) | (data < -9000)
+        valid_data = data[~mask]
+
+        if len(valid_data) == 0:
+            src.close()
+            return None, None
+
+        depth_data = np.abs(data)
+        vmin = float(np.nanmin(depth_data[~mask]))
+        vmax = float(np.nanmax(depth_data[~mask]))
+
+        # Downsample array if necessary for fast web rendering
+        h, w = depth_data.shape
+        if max(h, w) > max_size:
+            scale = max_size / float(max(h, w))
+            new_h, new_w = int(h * scale), int(w * scale)
+            img_pil = Image.fromarray(depth_data)
+            img_resized = img_pil.resize((new_w, new_h), Image.Resampling.BILINEAR)
+            depth_data = np.array(img_resized)
+
+            mask_pil = Image.fromarray(mask.astype(np.uint8) * 255)
+            mask_resized = mask_pil.resize((new_w, new_h), Image.Resampling.NEAREST)
+            mask = np.array(mask_resized) > 128
+
+        src.close()
+
+        # Apply colormap to depth data
+        norm = plt.Normalize(vmin=vmin, vmax=vmax)
+        cmap_func = plt.colormaps.get_cmap(colormap)
+        colored = cmap_func(norm(depth_data))  # RGBA float in [0,1]
+
+        # Apply transparency to nodata pixels
+        colored[mask, 3] = 0.0
+
+        rgba_uint8 = (colored * 255).astype(np.uint8)
+        img_out = Image.fromarray(rgba_uint8, mode='RGBA')
+
+        buf = io.BytesIO()
+        img_out.save(buf, format='PNG')
+        png_bytes = buf.getvalue()
+
+        b64_str = "data:image/png;base64," + base64.b64encode(png_bytes).decode('utf-8')
+
+        return b64_str, coords
+    except Exception:
+        return None, None
 
 # 1. Page Configuration
 st.set_page_config(
@@ -1045,11 +1159,31 @@ if len(st.session_state.custom_profile) >= 2:
         name='Profile Path',
     ))
 
+# Generate Bathymetry Mapbox Layer overlay
+mapbox_layers = []
+try:
+    b64_bath, coords_bath = get_bathymetry_mapbox_layer(
+        uploaded_bath_file.getvalue() if uploaded_bath_file is not None else "25NZE4376ml9_1.img",
+        bath_filename=uploaded_bath_file.name if uploaded_bath_file is not None else None,
+        colormap='viridis_r'
+    )
+    if b64_bath and coords_bath:
+        mapbox_layers.append({
+            "sourcetype": "image",
+            "source": b64_bath,
+            "coordinates": coords_bath,
+            "opacity": 0.65,
+            "below": "traces"
+        })
+except Exception:
+    pass
+
 fig_map.update_layout(
     mapbox=dict(
         style="open-street-map" if not IS_DARK else "carto-darkmatter",
         center=dict(lat=df_coords['lat'].mean(), lon=df_coords['lon'].mean()),
-        zoom=11.5
+        zoom=11.5,
+        layers=mapbox_layers
     ),
     clickmode='event+select',
     margin=dict(l=0, r=0, t=0, b=0),
@@ -1108,6 +1242,7 @@ else:
         st.session_state.custom_profile,
         df_coords,
         bath_file_bytes=uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None,
+        bath_filename=uploaded_bath_file.name if uploaded_bath_file is not None else None,
         step_m=min(interp_dx, 1.0)
     )
 
@@ -1230,6 +1365,7 @@ else:
                 mode='lines' if is_bath_top else 'lines+markers',
                 line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2.5),
                 marker=dict(size=6, color='#ef4444') if not is_bath_top else None,
+                hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Top Surface (LAT)</extra>",
                 name='Top Surface (LAT)',
                 showlegend=(col_idx == 1)  # Only show once in the legend
             ),
@@ -1379,6 +1515,7 @@ else:
                     mode='lines' if is_bath_top else 'lines+markers',
                     line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2.5),
                     marker=dict(size=6, color='#ef4444') if not is_bath_top else None,
+                    hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Top Surface (LAT)</extra>",
                     name='Top Surface (LAT)'
                 ))
                 fig63.add_trace(go.Scatter(
@@ -1418,6 +1555,7 @@ else:
                     mode='lines' if is_bath_top else 'lines+markers',
                     line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2.5),
                     marker=dict(size=6, color='#ef4444') if not is_bath_top else None,
+                    hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Top Surface (LAT)</extra>",
                     name='Top Surface (LAT)'
                 ))
                 fig_d50.add_trace(go.Scatter(
