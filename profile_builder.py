@@ -15,6 +15,64 @@ try:
 except ImportError:
     HAS_CV2 = False
 
+# Custom Discrete Colormap Configuration
+HEX_COLORS = [
+    '#800000',  # Dark maroon/red (bottom)
+    '#D7301F',  # Deep orange-red
+    '#F47C20',  # Orange
+    '#FFED6F',  # Yellow
+    '#FFFFCC',  # Cream/Light yellow
+    '#BCBD37'   # Olive-yellow (top)
+]
+
+SILT_BINS = [0, 1, 2, 4, 6, 8, 10, 20, 50]
+D50_BINS = [0, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.6, 10]
+
+def hex_to_rgb(hex_str):
+    hex_str = hex_str.lstrip('#')
+    return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
+
+def rgb_to_hex(rgb):
+    return '#{:02x}{:02x}{:02x}'.format(
+        max(0, min(255, int(round(rgb[0])))),
+        max(0, min(255, int(round(rgb[1])))),
+        max(0, min(255, int(round(rgb[2]))))
+    )
+
+def interpolate_colors(hex_colors, n_out):
+    if n_out <= 1:
+        return [hex_colors[0]]
+    n_in = len(hex_colors)
+    rgbs = [hex_to_rgb(c) for c in hex_colors]
+    out_colors = []
+    for i in range(n_out):
+        t = i / (n_out - 1)
+        pos = t * (n_in - 1)
+        idx = int(pos)
+        if idx >= n_in - 1:
+            out_colors.append(hex_colors[-1])
+        else:
+            frac = pos - idx
+            r = rgbs[idx][0] + (rgbs[idx+1][0] - rgbs[idx][0]) * frac
+            g = rgbs[idx][1] + (rgbs[idx+1][1] - rgbs[idx][1]) * frac
+            b = rgbs[idx][2] + (rgbs[idx+1][2] - rgbs[idx][2]) * frac
+            out_colors.append(rgb_to_hex((r, g, b)))
+    return out_colors
+
+def create_discrete_colorscale(bins, hex_colors):
+    n_bins = len(bins) - 1
+    bin_colors = interpolate_colors(hex_colors, n_bins)
+    
+    b_min, b_max = bins[0], bins[-1]
+    norm_bins = [(b - b_min) / (b_max - b_min) for b in bins]
+    
+    colorscale = []
+    for i in range(n_bins):
+        colorscale.append([norm_bins[i], bin_colors[i]])
+        colorscale.append([norm_bins[i+1], bin_colors[i]])
+        
+    return colorscale
+
 # 1. Page Configuration
 st.set_page_config(
     page_title="Geotechnical Profile Builder",
@@ -590,7 +648,7 @@ bar_width = st.sidebar.slider(
 st.sidebar.markdown('<div class="sidebar-title">🎨 Color Ranges & Palettes</div>', unsafe_allow_html=True)
 
 # Silt/Clay colormaps
-cmap_options = ['Viridis', 'Plasma', 'Cividis', 'Inferno', 'Magma', 'Turbo', 'Rainbow', 'Spectral_r', 'coolwarm']
+cmap_options = ['Custom (Discrete)', 'Viridis', 'Plasma', 'Cividis', 'Inferno', 'Magma', 'Turbo', 'Rainbow', 'Spectral_r', 'coolwarm']
 selected_cmap_63 = st.sidebar.selectbox("Silt/Clay Colormap", options=cmap_options, index=0, key="cmap_63")
 
 min_63_data = float(df['63calculated. met zoutcorrectie'].min())
@@ -598,25 +656,80 @@ max_63_data = float(df['63calculated. met zoutcorrectie'].max())
 limits_63 = st.sidebar.slider(
     "Silt/Clay Range (%)",
     min_value=0.0,
-    max_value=35.0,
+    max_value=50.0,
     value=(min_63_data, max_63_data),
     step=0.5,
     key="limits_63_slider"
 )
 
 # d50 colormaps
-selected_cmap_d50 = st.sidebar.selectbox("d50 Colormap", options=cmap_options, index=1, key="cmap_d50")
+selected_cmap_d50 = st.sidebar.selectbox("d50 Colormap", options=cmap_options, index=0, key="cmap_d50")
 
 min_d50_data = float(df['d50'].min())
 max_d50_data = float(df['d50'].max())
 limits_d50 = st.sidebar.slider(
     "d50 Range (mm)",
     min_value=0.0,
-    max_value=1.0,
+    max_value=10.0,
     value=(min_d50_data, max_d50_data),
     step=0.01,
     key="limits_d50_slider"
 )
+
+# Configure active colorscales, limits, and colorbars
+if selected_cmap_63 == 'Custom (Discrete)':
+    colorscale_63 = create_discrete_colorscale(SILT_BINS, HEX_COLORS)
+    cmin_63 = SILT_BINS[0]
+    cmax_63 = SILT_BINS[-1]
+    colorbar_63 = dict(
+        title="Silt/Clay (%)",
+        x=0.47,
+        thickness=15,
+        len=0.85,
+        y=0.45,
+        tickvals=SILT_BINS,
+        ticktext=[str(b) for b in SILT_BINS]
+    )
+    cb_63_heat = dict(title="Silt/Clay (%)", thickness=15, tickvals=SILT_BINS, ticktext=[str(b) for b in SILT_BINS])
+else:
+    colorscale_63 = selected_cmap_63
+    cmin_63 = limits_63[0]
+    cmax_63 = limits_63[1]
+    colorbar_63 = dict(
+        title="Silt/Clay (%)",
+        x=0.47,
+        thickness=15,
+        len=0.85,
+        y=0.45
+    )
+    cb_63_heat = dict(title="Silt/Clay (%)", thickness=15)
+
+if selected_cmap_d50 == 'Custom (Discrete)':
+    colorscale_d50 = create_discrete_colorscale(D50_BINS, HEX_COLORS)
+    cmin_d50 = D50_BINS[0]
+    cmax_d50 = D50_BINS[-1]
+    colorbar_d50 = dict(
+        title="d50 (mm)",
+        x=1.02,
+        thickness=15,
+        len=0.85,
+        y=0.45,
+        tickvals=D50_BINS,
+        ticktext=[str(b) for b in D50_BINS]
+    )
+    cb_d50_heat = dict(title="d50 (mm)", thickness=15, tickvals=D50_BINS, ticktext=[str(b) for b in D50_BINS])
+else:
+    colorscale_d50 = selected_cmap_d50
+    cmin_d50 = limits_d50[0]
+    cmax_d50 = limits_d50[1]
+    colorbar_d50 = dict(
+        title="d50 (mm)",
+        x=1.02,
+        thickness=15,
+        len=0.85,
+        y=0.45
+    )
+    cb_d50_heat = dict(title="d50 (mm)", thickness=15)
 
 # Active Custom Profile Editor in Sidebar
 st.sidebar.markdown('<div class="sidebar-title">📍 Profile Path Manager</div>', unsafe_allow_html=True)
@@ -866,16 +979,10 @@ else:
             width=bar_width,
             marker=dict(
                 color=prof_df['63calculated. met zoutcorrectie'],
-                colorscale=selected_cmap_63,
-                cmin=limits_63[0],
-                cmax=limits_63[1],
-                colorbar=dict(
-                    title="Silt/Clay (%)", 
-                    x=0.47, 
-                    thickness=15,
-                    len=0.85,
-                    y=0.45
-                ),
+                colorscale=colorscale_63,
+                cmin=cmin_63,
+                cmax=cmax_63,
+                colorbar=colorbar_63,
                 showscale=True,
                 line=dict(color='rgba(0,0,0,0.15)' if not is_dark_plot else 'rgba(255,255,255,0.15)', width=0.4)
             ),
@@ -905,16 +1012,10 @@ else:
             width=bar_width,
             marker=dict(
                 color=prof_df['d50'],
-                colorscale=selected_cmap_d50,
-                cmin=limits_d50[0],
-                cmax=limits_d50[1],
-                colorbar=dict(
-                    title="d50 (mm)", 
-                    x=1.02, 
-                    thickness=15,
-                    len=0.85,
-                    y=0.45
-                ),
+                colorscale=colorscale_d50,
+                cmin=cmin_d50,
+                cmax=cmax_d50,
+                colorbar=colorbar_d50,
                 showscale=True,
                 line=dict(color='rgba(0,0,0,0.15)' if not is_dark_plot else 'rgba(255,255,255,0.15)', width=0.4)
             ),
@@ -1081,10 +1182,10 @@ else:
                     z=grid63,
                     x=x63,
                     y=y63,
-                    colorscale=selected_cmap_63,
-                    zmin=limits_63[0],
-                    zmax=limits_63[1],
-                    colorbar=dict(title="Silt/Clay (%)", thickness=15),
+                    colorscale=colorscale_63,
+                    zmin=cmin_63,
+                    zmax=cmax_63,
+                    colorbar=cb_63_heat,
                     connectgaps=False,
                     hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>Silt/Clay: %{z:.2f}%<extra></extra>",
                 ))
@@ -1100,7 +1201,7 @@ else:
                     mode='lines+markers',
                     line=dict(color='#3b82f6' if not is_dark_plot else '#93c5fd', width=2, dash='dash'),
                     marker=dict(size=6, color='#3b82f6'),
-                    name='Borehole Bottom (LAT)'
+                    name='Ligging zeebodem (ALAT)'
                 ))
                 fig63.update_layout(
                     title="<b>Silt/Clay Content (%) – Interpolated</b>",
@@ -1120,10 +1221,10 @@ else:
                     z=gridd50,
                     x=xd50,
                     y=yd50,
-                    colorscale=selected_cmap_d50,
-                    zmin=limits_d50[0],
-                    zmax=limits_d50[1],
-                    colorbar=dict(title="d50 (mm)", thickness=15),
+                    colorscale=colorscale_d50,
+                    zmin=cmin_d50,
+                    zmax=cmax_d50,
+                    colorbar=cb_d50_heat,
                     connectgaps=False,
                     hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>d50: %{z:.4f} mm<extra></extra>",
                 ))
@@ -1139,7 +1240,7 @@ else:
                     mode='lines+markers',
                     line=dict(color='#3b82f6' if not is_dark_plot else '#93c5fd', width=2, dash='dash'),
                     marker=dict(size=6, color='#3b82f6'),
-                    name='Borehole Bottom (LAT)'
+                    name='Ligging zeebodem (ALAT)'
                 ))
                 fig_d50.update_layout(
                     title="<b>Median Grain Size d50 (mm) – Interpolated</b>",
