@@ -105,6 +105,15 @@ def create_equal_discrete_colorscale(n_bins, hex_colors):
         colorscale.append([(i + 1) / n_bins, bin_colors[i]])
     return colorscale
 
+def get_bin_color(val, bins, colors):
+    """Return color for a value based on discrete bins."""
+    if pd.isna(val):
+        return '#999999'
+    for i in range(len(bins) - 1):
+        if val < bins[i + 1]:
+            return colors[min(i, len(colors) - 1)]
+    return colors[-1]
+
 def get_profile_bathymetry(profile_bh_list, df_coords, bath_file_bytes=None, bath_filename=None, step_m=1.0):
     """
     Samples bathymetry continuously along the polyline connecting profile_bh_list.
@@ -672,17 +681,13 @@ def load_data(uploaded_file, bath_file_bytes=None):
 # 4. Data Ingestion & Upload Section
 col_up1, col_up2 = st.columns([1.8, 1.2])
 with col_up1:
-    uploaded_file = st.file_uploader("📂 Upload Borehole Excel File (.xlsx)", type=["xlsx"])
+    uploaded_file = st.file_uploader("📂 Upload Boringen Excel-bestand (.xlsx)", type=["xlsx"])
 with col_up2:
-    use_bath_map = st.checkbox("🗺️ Enable Bathymetry Map Mode", value=True, help="Uncheck to disable bathymetry map sampling and use Excel borehole top elevations directly.")
-    if use_bath_map:
-        uploaded_bath_file = st.file_uploader("Optional Custom Bathymetry Map (.img / .tif)", type=["img", "tif", "geotiff"])
-    else:
-        uploaded_bath_file = None
+    use_bath_map = st.checkbox("🗺️ Bathymetriekaart Modus Inschakelen", value=True, help="Vink uit om bathymetriekaart sampling uit te schakelen en maaiveldhoogtes rechtstreeks uit het Excel-bestand te gebruiken.")
+    uploaded_bath_file = st.file_uploader("📂 Upload Aangepaste Bathymetriekaart (.img / .tif)", type=["img", "tif", "tiff"])
 
-# Require Excel file to be uploaded before plotting
 if uploaded_file is None:
-    st.info("👋 **Welcome to Borehole Profile Builder!** Please upload your Borehole Excel file (`.xlsx`) above to get started.")
+    st.info("👋 **Welkom bij Borehole Profile Builder!** Upload hierboven uw Boringen Excel-bestand (`.xlsx`) om te beginnen.")
     st.stop()
 
 # Verify Bathymetry Raster availability when Bathymetry Mode is enabled
@@ -704,8 +709,12 @@ except Exception as e:
     st.stop()
 
 # 5. Extract Unique Coordinates and Boreholes
-df_coords = df[['Boornummer', 'X', 'Y', 'lat', 'lon', 'X_RD', 'Y_RD', 'X_25831', 'Y_25831', 'bathymetry']].drop_duplicates().sort_values('Boornummer')
-boreholes = list(df_coords['Boornummer'].unique())
+if 'df' in locals() or 'df' in globals():
+    df_coords = df[['Boornummer', 'X', 'Y', 'lat', 'lon', 'X_RD', 'Y_RD', 'X_25831', 'Y_25831', 'bathymetry']].drop_duplicates().sort_values('Boornummer')
+    boreholes = list(df_coords['Boornummer'].unique())
+else:
+    df_coords = pd.DataFrame()
+    boreholes = []
 
 # Initialize session state variables
 if "custom_profile" not in st.session_state:
@@ -967,6 +976,304 @@ def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, pr
 
     return x_arr, y_arr, result
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PDF Report Exporter Generator Function
+# ══════════════════════════════════════════════════════════════════════════════
+def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, interp_method,
+                        anis_x, anis_y, use_bath_map, bath_raster_available, uploaded_bath_file,
+                        bar_width, show_labels, selected_cmap_63, selected_cmap_d50):
+    """
+    Generates a comprehensive multi-page PDF report with:
+    - Cover page: Summary statistics, dataset info, interpolation settings & location map
+    - Profile page: Silt/Clay (%<0.063mm) and d50 borehole profile transects
+    - Interpolation page: 2D interpolated cross-sections for %<0.063mm and d50
+    - Depth-slices pages: Spatial scatter plots of %<0.063mm and d50 per unique depth slice across all boreholes
+    """
+    import io
+    import datetime
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+    import matplotlib.colors as mcolors
+
+    buf = io.BytesIO()
+
+    # Pre-compute metrics & statistics
+    num_total_bh = len(df_coords)
+    num_sel_bh = len(custom_profile)
+    
+    # Calculate profile distances
+    cum_dist = {}
+    last_x, last_y = None, None
+    current_dist = 0.0
+    for bh in custom_profile:
+        r = df_coords[df_coords['Boornummer'] == bh]
+        if not r.empty:
+            x, y = r['X'].iloc[0], r['Y'].iloc[0]
+            if last_x is not None:
+                current_dist += np.sqrt((x - last_x)**2 + (y - last_y)**2)
+            cum_dist[bh] = current_dist
+            last_x, last_y = x, y
+        else:
+            cum_dist[bh] = 0.0
+
+    prof_df = df[df['Boornummer'].isin(custom_profile)].copy() if custom_profile else pd.DataFrame()
+
+    with PdfPages(buf) as pdf:
+        # ── Page 1: Samenvatting, Statistieken & Kaart ────────────────────────
+        fig1 = plt.figure(figsize=(8.27, 11.69)) # A4 portrait
+        fig1.patch.set_facecolor('#ffffff')
+        
+        plt.figtext(0.08, 0.94, "GEOTECHNISCH PROFIEL & DIEPTE-INTERVAL RAPPORT", fontsize=14, fontweight='bold', color='#1e1e24')
+        plt.figtext(0.08, 0.925, f"Gegenereerd op: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", fontsize=9, color='#666666')
+        
+        # Summary text block
+        silt_prof_mean = prof_df['63calculated. met zoutcorrectie'].mean() if not prof_df.empty else np.nan
+        silt_prof_min = prof_df['63calculated. met zoutcorrectie'].min() if not prof_df.empty else np.nan
+        silt_prof_max = prof_df['63calculated. met zoutcorrectie'].max() if not prof_df.empty else np.nan
+        
+        d50_prof_mean = prof_df['d50'].mean() if not prof_df.empty else np.nan
+        d50_prof_min = prof_df['d50'].min() if not prof_df.empty else np.nan
+        d50_prof_max = prof_df['d50'].max() if not prof_df.empty else np.nan
+
+        summary_text = (
+            "1. ALGEMENE INFORMATIE & STATISTIEKEN\n"
+            "---------------------------------------------------------------------------------------------------------\n"
+            f"• Totaal aantal boringen in bestand : {num_total_bh}\n"
+            f"• Geselecteerde boringen in profiel ({num_sel_bh}): {', '.join(custom_profile) if custom_profile else 'Geen geselecteerd'}\n"
+            f"• Profiellengte: {current_dist:.1f} m\n\n"
+            "   Profielstatistieken:\n"
+            f"     - %<0.063mm : Gemiddelde = {silt_prof_mean:.2f}%, Min = {silt_prof_min:.2f}%, Max = {silt_prof_max:.2f}%\n"
+            f"     - d50 (mm)  : Gemiddelde = {d50_prof_mean:.3f} mm, Min = {d50_prof_min:.3f} mm, Max = {d50_prof_max:.3f} mm\n\n"
+            "2. INTERPOLATIE INSTELLINGEN\n"
+            "---------------------------------------------------------------------------------------------------------\n"
+            f"• Horizontale stap dx: {interp_dx:.1f} m  |  Dieptestap dy: {interp_dy:.2f} m\n"
+            f"• Interpolatiemethode: {interp_method}\n"
+            f"• Anisotropie (Laagcontinuïteit): Horizontaal (X) = {anis_x:.2f}, Verticaal (Y) = {anis_y:.2f}\n"
+            f"• Bathymetriekaart Modus: {'Actief' if (use_bath_map and bath_raster_available) else 'Niet beschikbaar'}\n"
+        )
+        plt.figtext(0.08, 0.64, summary_text, fontsize=9.5, family='monospace', verticalalignment='top')
+
+        # Map Subplot on lower part of Page 1
+        ax_map = fig1.add_axes([0.1, 0.08, 0.8, 0.50])
+        ax_map.set_title("Kaart Boringselectie & Profielpad", fontsize=11, fontweight='bold', pad=10)
+        
+        # Plot all boreholes
+        ax_map.scatter(df_coords['X'], df_coords['Y'], color='#22c55e', s=40, zorder=3, label='Alle boringen')
+        for _, row in df_coords.iterrows():
+            ax_map.annotate(row['Boornummer'], (row['X'], row['Y']), fontsize=7, textcoords="offset points", xytext=(0,4), ha='center')
+        
+        # Plot selected profile path
+        if len(custom_profile) >= 2:
+            prof_xs = []
+            prof_ys = []
+            for bh in custom_profile:
+                r = df_coords[df_coords['Boornummer'] == bh]
+                if not r.empty:
+                    prof_xs.append(r['X'].iloc[0])
+                    prof_ys.append(r['Y'].iloc[0])
+            ax_map.plot(prof_xs, prof_ys, color='#dc2626', linewidth=2, linestyle='-', zorder=4, label='Profielpad')
+            ax_map.scatter(prof_xs, prof_ys, color='#dc2626', s=80, zorder=5)
+            for idx, (px, py, pbh) in enumerate(zip(prof_xs, prof_ys, custom_profile)):
+                ax_map.annotate(f"{idx+1}. {pbh}", (px, py), fontsize=8, fontweight='bold', color='#dc2626', textcoords="offset points", xytext=(0,6), ha='center')
+
+        ax_map.set_xlabel("X (UTM)", fontsize=9)
+        ax_map.set_ylabel("Y (UTM)", fontsize=9)
+        ax_map.grid(True, linestyle='--', alpha=0.4)
+        ax_map.legend(loc='upper right', fontsize=8)
+        ax_map.set_aspect('equal', 'datalim')
+
+        pdf.savefig(fig1)
+        plt.close(fig1)
+
+        # ── Page 2: Boringen Profieldoorsneden ────────────────────────────────
+        if len(custom_profile) >= 2 and not prof_df.empty:
+            fig2, (ax_silt, ax_d50) = plt.subplots(2, 1, figsize=(8.27, 11.69))
+            fig2.suptitle("Boringen Profieldoorsneden", fontsize=14, fontweight='bold', y=0.95)
+            
+            # Subplot 1: %<0.063mm bar profile
+            silt_df = prof_df[prof_df['63calculated. met zoutcorrectie'].notna()].copy()
+            if not silt_df.empty:
+                silt_heights = silt_df['Tra_tot_lat'] - silt_df['Tra_van_lat']
+                silt_bottoms = silt_df['Tra_van_lat']
+                silt_xs = [cum_dist[bh] for bh in silt_df['Boornummer']]
+                
+                n_b63 = len(SILT_BINS) - 1
+                cmap63_src = mcolors.LinearSegmentedColormap.from_list("c63", HEX_COLORS)
+                cols63 = [mcolors.to_hex(cmap63_src(i / max(1, n_b63 - 1))) for i in range(n_b63)]
+                bar_cols = [get_bin_color(v, SILT_BINS, cols63) for v in silt_df['63calculated. met zoutcorrectie']]
+                
+                ax_silt.bar(silt_xs, silt_heights, bottom=silt_bottoms, width=bar_width, color=bar_cols, edgecolor='black', linewidth=0.3)
+                if show_labels:
+                    for x_val, bot_val, h_val, v_val in zip(silt_xs, silt_bottoms, silt_heights, silt_df['63calculated. met zoutcorrectie']):
+                        ax_silt.text(x_val, bot_val + h_val/2, f"{v_val:.1f}%", ha='center', va='center', fontsize=6, color='black')
+
+            ax_silt.set_title("Percentage (%) < 0.063mm", fontsize=11, fontweight='bold')
+            ax_silt.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
+            ax_silt.set_xlabel("Lengte langs profiel (m)", fontsize=9)
+            ax_silt.invert_yaxis()
+            ax_silt.grid(True, linestyle='--', alpha=0.4)
+            
+            # Subplot 2: d50 bar profile
+            d50_df = prof_df[prof_df['d50'].notna()].copy()
+            if not d50_df.empty:
+                d50_heights = d50_df['Tra_tot_lat'] - d50_df['Tra_van_lat']
+                d50_bottoms = d50_df['Tra_van_lat']
+                d50_xs = [cum_dist[bh] for bh in d50_df['Boornummer']]
+                
+                n_bd50 = len(D50_BINS) - 1
+                cmapd50_src = mcolors.LinearSegmentedColormap.from_list("cd50", HEX_COLORS)
+                cols_d50 = [mcolors.to_hex(cmapd50_src(i / max(1, n_bd50 - 1))) for i in range(n_bd50)]
+                bar_cols_d50 = [get_bin_color(v, D50_BINS, cols_d50) for v in d50_df['d50']]
+                
+                ax_d50.bar(d50_xs, d50_heights, bottom=d50_bottoms, width=bar_width, color=bar_cols_d50, edgecolor='black', linewidth=0.3)
+                if show_labels:
+                    for x_val, bot_val, h_val, v_val in zip(d50_xs, d50_bottoms, d50_heights, d50_df['d50']):
+                        ax_d50.text(x_val, bot_val + h_val/2, f"{v_val:.2f}", ha='center', va='center', fontsize=6, color='black')
+
+            ax_d50.set_title("d50 (mm)", fontsize=11, fontweight='bold')
+            ax_d50.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
+            ax_d50.set_xlabel("Lengte langs profiel (m)", fontsize=9)
+            ax_d50.invert_yaxis()
+            ax_d50.grid(True, linestyle='--', alpha=0.4)
+            
+            plt.tight_layout(rect=[0, 0, 1, 0.93])
+            pdf.savefig(fig2)
+            plt.close(fig2)
+
+        # ── Page 3: Geïnterpoleerde Dwarsdoorsneden ─────────────────────────────
+        if len(custom_profile) >= 2:
+            top_pts = []
+            bot_pts = []
+            for bh in custom_profile:
+                bh_df = prof_df[prof_df['Boornummer'] == bh]
+                if not bh_df.empty and bh_df['Tra_van_lat'].notna().any():
+                    top_pts.append((cum_dist[bh], float(bh_df['Tra_van_lat'].min())))
+                    bot_pts.append((cum_dist[bh], float(bh_df['Tra_tot_lat'].max())))
+                else:
+                    top_pts.append((cum_dist[bh], 0.0))
+                    top_pts.append((cum_dist[bh], 10.0))
+
+            try:
+                x63, y63, grid63 = interpolate_profile(
+                    prof_df, cum_dist, top_pts, bot_pts,
+                    interp_dx, interp_dy,
+                    "63calculated. met zoutcorrectie",
+                    interp_method=interp_method,
+                    anis_x=anis_x,
+                    anis_y=anis_y
+                )
+                xd50, yd50, gridd50 = interpolate_profile(
+                    prof_df, cum_dist, top_pts, bot_pts,
+                    interp_dx, interp_dy,
+                    "d50",
+                    interp_method=interp_method,
+                    anis_x=anis_x,
+                    anis_y=anis_y
+                )
+
+                fig3, (ax_inp63, ax_inpd50) = plt.subplots(2, 1, figsize=(8.27, 11.69))
+                fig3.suptitle("Geïnterpoleerde Dwarsdoorsneden", fontsize=14, fontweight='bold', y=0.95)
+
+                cmap63_src = mcolors.LinearSegmentedColormap.from_list("c63", HEX_COLORS)
+                cols63 = [cmap63_src(i / max(1, len(SILT_BINS)-2)) for i in range(len(SILT_BINS)-1)]
+                cmap63_np = mcolors.ListedColormap(cols63)
+                norm63_np = mcolors.BoundaryNorm(SILT_BINS, len(SILT_BINS)-1)
+
+                im63 = ax_inp63.pcolormesh(x63, y63, grid63, cmap=cmap63_np, norm=norm63_np, shading='auto')
+                ax_inp63.set_title("%<0.063mm – Geïnterpoleerd", fontsize=11, fontweight='bold')
+                ax_inp63.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
+                ax_inp63.set_xlabel("Lengte langs profiel (m)", fontsize=9)
+                ax_inp63.invert_yaxis()
+                fig3.colorbar(im63, ax=ax_inp63, label="%<0.063mm")
+
+                cmapd50_src = mcolors.LinearSegmentedColormap.from_list("cd50", HEX_COLORS)
+                cols_d50 = [cmapd50_src(i / max(1, len(D50_BINS)-2)) for i in range(len(D50_BINS)-1)]
+                cmapd50_np = mcolors.ListedColormap(cols_d50)
+                normd50_np = mcolors.BoundaryNorm(D50_BINS, len(D50_BINS)-1)
+
+                imd50 = ax_inpd50.pcolormesh(xd50, yd50, gridd50, cmap=cmapd50_np, norm=normd50_np, shading='auto')
+                ax_inpd50.set_title("d50 (mm) – Geïnterpoleerd", fontsize=11, fontweight='bold')
+                ax_inpd50.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
+                ax_inpd50.set_xlabel("Lengte langs profiel (m)", fontsize=9)
+                ax_inpd50.invert_yaxis()
+                fig3.colorbar(imd50, ax=ax_inpd50, label="d50 (mm)")
+
+                plt.tight_layout(rect=[0, 0, 1, 0.93])
+                pdf.savefig(fig3)
+                plt.close(fig3)
+            except Exception:
+                pass
+
+        # ── Pages 4+: Diepte-interval Kaarten ─────────────────────────────────
+        df_maps = df.copy()
+        df_maps['MID_LAT'] = np.round((df_maps['Tra_van_lat'] + df_maps['Tra_tot_lat']) / 2.0, 0)
+        depths = np.sort(df_maps['MID_LAT'].dropna().unique())
+
+        n_b63 = len(SILT_BINS) - 1
+        cmap63_src = mcolors.LinearSegmentedColormap.from_list("c63", HEX_COLORS)
+        cols63 = [mcolors.to_hex(cmap63_src(i / max(1, n_b63 - 1))) for i in range(n_b63)]
+
+        n_bd50 = len(D50_BINS) - 1
+        cmapd50_src = mcolors.LinearSegmentedColormap.from_list("cd50", HEX_COLORS)
+        cols_d50 = [mcolors.to_hex(cmapd50_src(i / max(1, n_bd50 - 1))) for i in range(n_bd50)]
+
+        for depth_val in depths:
+            sel = df_maps[df_maps['MID_LAT'] == depth_val].dropna(subset=['X', 'Y'])
+            if sel.empty:
+                continue
+
+            depth_lo = depth_val - 0.5
+            depth_hi = depth_val + 0.5
+
+            fig_d, (ax_d63, ax_dd50) = plt.subplots(1, 2, figsize=(11.69, 8.27))
+            fig_d.suptitle(f"Diepte-interval Kaart: {depth_lo:.2f} – {depth_hi:.2f} m ALAT", fontsize=13, fontweight='bold', y=0.95)
+
+            bh_at_depth = set(sel['Boornummer'].unique())
+            missing_bh = df_coords[~df_coords['Boornummer'].isin(bh_at_depth)]
+
+            # Silt plot
+            if not missing_bh.empty:
+                ax_d63.scatter(missing_bh['X'], missing_bh['Y'], color='#d4d4d4', s=25, label='Geen data op dit diepte interval')
+            
+            valid_63 = sel[sel['63calculated. met zoutcorrectie'].notna()]
+            if not valid_63.empty:
+                c63_arr = [get_bin_color(v, SILT_BINS, cols63) for v in valid_63['63calculated. met zoutcorrectie']]
+                ax_d63.scatter(valid_63['X'], valid_63['Y'], color=c63_arr, s=60, edgecolor='black', linewidth=0.5, label='%<0.063mm')
+                for _, row in valid_63.iterrows():
+                    ax_d63.annotate(f"{row['63calculated. met zoutcorrectie']:.1f}%", (row['X'], row['Y']), fontsize=6, ha='center', va='bottom', xytext=(0,3), textcoords='offset points')
+
+            ax_d63.set_title("%<0.063mm", fontsize=11, fontweight='bold')
+            ax_d63.set_xlabel("X (UTM)", fontsize=8)
+            ax_d63.set_ylabel("Y (UTM)", fontsize=8)
+            ax_d63.grid(True, linestyle='--', alpha=0.3)
+            ax_d63.legend(loc='lower right', fontsize=7)
+            ax_d63.set_aspect('equal', 'datalim')
+
+            # d50 plot
+            if not missing_bh.empty:
+                ax_dd50.scatter(missing_bh['X'], missing_bh['Y'], color='#d4d4d4', s=25, label='Geen data op dit diepte interval')
+            
+            valid_d50 = sel[sel['d50'].notna()]
+            if not valid_d50.empty:
+                cd50_arr = [get_bin_color(v, D50_BINS, cols_d50) for v in valid_d50['d50']]
+                ax_dd50.scatter(valid_d50['X'], valid_d50['Y'], color=cd50_arr, s=60, edgecolor='black', linewidth=0.5, label='d50 (mm)')
+                for _, row in valid_d50.iterrows():
+                    ax_dd50.annotate(f"{row['d50']:.2f}", (row['X'], row['Y']), fontsize=6, ha='center', va='bottom', xytext=(0,3), textcoords='offset points')
+
+            ax_dd50.set_title("d50 (mm)", fontsize=11, fontweight='bold')
+            ax_dd50.set_xlabel("X (UTM)", fontsize=8)
+            ax_dd50.set_ylabel("Y (UTM)", fontsize=8)
+            ax_dd50.grid(True, linestyle='--', alpha=0.3)
+            ax_dd50.legend(loc='lower right', fontsize=7)
+            ax_dd50.set_aspect('equal', 'datalim')
+
+            plt.tight_layout(rect=[0, 0, 1, 0.93])
+            pdf.savefig(fig_d)
+            plt.close(fig_d)
+
+    buf.seek(0)
+    return buf.getvalue()
+
 # Callback to capture clicks from the map
 def handle_map_click():
     if "map_plot" not in st.session_state:
@@ -1015,45 +1322,46 @@ with head_left:
     <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 1rem;">
         <span style="font-size: 2.2rem; color: #4f46e5;">📐</span>
         <div>
-            <h1 style="margin: 0; font-size: 1.7rem; font-weight: 800; letter-spacing: -0.03em;">Borehole Profile Builder</h1>
-            <p style="margin: 0; font-size: 0.82rem; color: #71717a;">Click boreholes on the map to define a cross-section transect and draw silt/clay (63calculated) and d50 properties</p>
+            <h1 style="margin: 0; font-size: 1.7rem; font-weight: 800; letter-spacing: -0.03em;">Geotechnische Profiel Builder</h1>
+            <p style="margin: 0; font-size: 0.82rem; color: #71717a;">Klik op boringen op de kaart om een profieldoorsnede te definiëren en %<0.063mm en d50 eigenschappen te tekenen</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
 with head_right:
-    theme_label = "☀️ Light" if IS_DARK else "🌙 Dark"
+    theme_label = "☀️ Licht" if IS_DARK else "🌙 Donker"
     st.button(theme_label, on_click=toggle_theme, use_container_width=True)
 
 # 7. Sidebar Controls
-st.sidebar.markdown('<div class="sidebar-title">🧭 Profile Settings</div>', unsafe_allow_html=True)
+st.sidebar.markdown('<div class="sidebar-title">🧭 Profielinstellingen</div>', unsafe_allow_html=True)
 
 # Bathymetry sampling status
-valid_bath_count = df['bathymetry'].notna().sum() if 'bathymetry' in df.columns else 0
+has_df = ('df' in locals() or 'df' in globals())
+valid_bath_count = df['bathymetry'].notna().sum() if has_df and 'bathymetry' in df.columns else 0
 if valid_bath_count > 0:
-    st.sidebar.caption(f"🟢 **Bathymetry Map (EPSG:25831)**: Active ({valid_bath_count} points sampled)")
+    st.sidebar.caption(f"🟢 **Bathymetriekaart (EPSG:25831)**: Actief ({valid_bath_count} punten gesampeld)")
 else:
-    st.sidebar.caption("🟡 **Bathymetry Map**: No raster coverage for current file. Upload a matching `.img` / `.tif` map above.")
+    st.sidebar.caption("🟡 **Bathymetriekaart**: Geen rasterdekking voor het huidige bestand. Upload hierboven een overeenkomstige `.img` / `.tif` kaart.")
 
 # Map zoom level setting
 map_zoom_level = st.sidebar.slider(
-    "🔍 Map Zoom Level",
+    "🔍 Zoomniveau Kaart",
     min_value=7.0,
     max_value=18.0,
     value=11.5,
     step=0.25,
-    help="Adjust default zoom level of the borehole selection map."
+    help="Pas het standaard zoomniveau van de boringselectiekaart aan."
 )
 
 # Toggle to show value labels on profile bars
-show_labels = st.sidebar.checkbox("🏷️ Show values on plot", value=True)
+show_labels = st.sidebar.checkbox("🏷️ Toon waarden in grafiek", value=True)
 
 # Force white plot backgrounds for exporting
-force_white_plots = st.sidebar.checkbox("⚪ Export-ready plots (white bg, black text)", value=False)
+force_white_plots = st.sidebar.checkbox("⚪ Exporteren geschikte grafieken (witte achtergrond, zwarte tekst)", value=False)
 is_dark_plot = IS_DARK and not force_white_plots
 
 # Plot spacing (bar width in meters)
 bar_width = st.sidebar.slider(
-    "📏 Borehole Bar Width (m)",
+    "📏 Staaftbreedte Boringen (m)",
     min_value=10,
     max_value=250,
     value=50,
@@ -1061,14 +1369,14 @@ bar_width = st.sidebar.slider(
 )
 
 # Colormap settings
-st.sidebar.markdown('<div class="sidebar-title">🎨 Color Ranges & Palettes</div>', unsafe_allow_html=True)
+st.sidebar.markdown('<div class="sidebar-title">🎨 Kleurbereik & Paletten</div>', unsafe_allow_html=True)
 
 # Silt/Clay colormaps
 cmap_options = ['Custom (Discrete)', 'Viridis', 'Plasma', 'Cividis', 'Inferno', 'Magma', 'Turbo', 'Rainbow', 'Spectral_r', 'coolwarm']
-selected_cmap_63 = st.sidebar.selectbox("Colormap %<0.063mm", options=cmap_options, index=0, key="cmap_63")
+selected_cmap_63 = st.sidebar.selectbox("Kleurenschaal %<0.063mm", options=cmap_options, index=0, key="cmap_63")
 
-min_63_data = float(df['63calculated. met zoutcorrectie'].min())
-max_63_data = float(df['63calculated. met zoutcorrectie'].max())
+min_63_data = float(df['63calculated. met zoutcorrectie'].min()) if has_df else 0.0
+max_63_data = float(df['63calculated. met zoutcorrectie'].max()) if has_df else 25.0
 limits_63 = st.sidebar.slider(
     "Bereik %<0.063mm",
     min_value=0.0,
@@ -1079,12 +1387,12 @@ limits_63 = st.sidebar.slider(
 )
 
 # d50 colormaps
-selected_cmap_d50 = st.sidebar.selectbox("d50 Colormap", options=cmap_options, index=0, key="cmap_d50")
+selected_cmap_d50 = st.sidebar.selectbox("Kleurenschaal d50", options=cmap_options, index=0, key="cmap_d50")
 
-min_d50_data = float(df['d50'].min())
-max_d50_data = float(df['d50'].max())
+min_d50_data = float(df['d50'].min()) if has_df else 0.0
+max_d50_data = float(df['d50'].max()) if has_df else 1.0
 limits_d50 = st.sidebar.slider(
-    "d50 Range (mm)",
+    "Bereik d50 (mm)",
     min_value=0.0,
     max_value=10.0,
     value=(min_d50_data, max_d50_data),
@@ -1168,46 +1476,46 @@ else:
     cb_d50_heat = dict(title="d50 (mm)", thickness=15)
 
 # Active Custom Profile Editor in Sidebar
-st.sidebar.markdown('<div class="sidebar-title">📍 Profile Path Manager</div>', unsafe_allow_html=True)
+st.sidebar.markdown('<div class="sidebar-title">📍 Profielpad Beheer</div>', unsafe_allow_html=True)
 
 selected_list = st.sidebar.multiselect(
-    "Search & select boreholes:",
+    "Zoek & selecteer boringen:",
     options=boreholes,
     key="sidebar_sel"
 )
 
 if st.session_state.custom_profile:
-    st.sidebar.markdown("**Path Sequence Editor:**")
+    st.sidebar.markdown("**Volgorde profielpad bewerken:**")
     for idx, bh in enumerate(st.session_state.custom_profile):
         col_name, col_up, col_down, col_del = st.sidebar.columns([5, 1, 1, 1])
         with col_name:
             st.markdown(f"<span style='font-size:0.85rem; font-weight:600;'>{idx+1}. {bh}</span>", unsafe_allow_html=True)
         with col_up:
             if idx > 0:
-                st.button("▲", key=f"up_{bh}_{idx}", help=f"Move {bh} up", on_click=move_up_callback, args=(idx,))
+                st.button("▲", key=f"up_{bh}_{idx}", help=f"Verplaats {bh} omhoog", on_click=move_up_callback, args=(idx,))
         with col_down:
             if idx < len(st.session_state.custom_profile) - 1:
-                st.button("▼", key=f"down_{bh}_{idx}", help=f"Move {bh} down", on_click=move_down_callback, args=(idx,))
+                st.button("▼", key=f"down_{bh}_{idx}", help=f"Verplaats {bh} omlaag", on_click=move_down_callback, args=(idx,))
         with col_del:
-            st.button("❌", key=f"del_{bh}_{idx}", help=f"Remove {bh}", on_click=remove_bh_callback, args=(bh,))
+            st.button("❌", key=f"del_{bh}_{idx}", help=f"Verwijder {bh}", on_click=remove_bh_callback, args=(bh,))
                 
-    st.sidebar.button("🗑️ Clear Selected Path", use_container_width=True, on_click=clear_path_callback)
+    st.sidebar.button("🗑️ Geselecteerd pad wissen", use_container_width=True, on_click=clear_path_callback)
 
 # Interpolation settings sidebar
-st.sidebar.markdown('<div class="sidebar-title">🧩 Interpolation Settings</div>', unsafe_allow_html=True)
+st.sidebar.markdown('<div class="sidebar-title">🧩 Interpolatie-instellingen</div>', unsafe_allow_html=True)
 interp_dx = st.sidebar.number_input(
-    "Horizontal step dx (m)",
+    "Horizontale stap dx (m)",
     min_value=1.0, max_value=500.0, value=10.0, step=1.0,
-    help="Grid resolution along the profile path, in metres."
+    help="Gridresolutie langs het profielpad, in meters."
 )
 interp_dy = st.sidebar.number_input(
-    "Depth step dy (m)",
+    "Dieptestap dy (m)",
     min_value=0.05, max_value=5.0, value=0.25, step=0.05,
-    help="Grid resolution in the depth direction, in metres."
+    help="Gridresolutie in de diepterichting, in meters."
 )
 
 _method_options = [
-    "OpenCV TELEA inpainting" if HAS_CV2 else "OpenCV TELEA (not installed)",
+    "OpenCV TELEA inpainting" if HAS_CV2 else "OpenCV TELEA (niet geïnstalleerd)",
     "scipy – linear",
     "scipy – cubic",
     "scipy – nearest",
@@ -1216,28 +1524,49 @@ _method_options = [
     "skimage – biharmonic",
 ]
 interp_method = st.sidebar.selectbox(
-    "Interpolation method",
+    "Interpolatiemethode",
     options=_method_options,
     index=0 if HAS_CV2 else 1,
-    help="Algorithm used to fill values between boreholes on the grid."
+    help="Algoritme om waarden tussen boringen op het grid op te vullen."
 )
 if not HAS_CV2 and interp_method.startswith("OpenCV"):
-    st.sidebar.warning("`opencv-python` is not installed – please choose another method.")
+    st.sidebar.warning("`opencv-python` is niet geïnstalleerd – kies een andere methode.")
 
 # Anisotropy / Layer Continuation Settings
-st.sidebar.markdown('<div class="sidebar-title" style="margin-top:1rem;">📐 Anisotropy (Layer Continuation)</div>', unsafe_allow_html=True)
+st.sidebar.markdown('<div class="sidebar-title" style="margin-top:1rem;">📐 Anisotropie (Laagcontinuïteit)</div>', unsafe_allow_html=True)
 anis_x = st.sidebar.slider(
-    "Horizontal weight (X)",
+    "Horizontaal gewicht (X)",
     min_value=0.01, max_value=10.0, value=1.0, step=0.05,
-    help="Lower values relative to Y shrink the horizontal coordinate, enforcing layer continuation."
+    help="Lagere waarden t.o.v. Y verkleinen de horizontale coördinaat, wat laagcontinuïteit afdwingt."
 )
 anis_y = st.sidebar.slider(
-    "Vertical weight (Y)",
+    "Verticaal gewicht (Y)",
     min_value=0.01, max_value=10.0, value=1.0, step=0.05,
-    help="Standard vertical weight. Usually kept at 1.0."
+    help="Standaard verticaal gewicht. Gewoonlijk op 1.0 gehouden."
 )
 
-st.sidebar.info("Select boreholes from the dropdown or click markers on the map to start building your profile path.")
+# 📄 PDF Export Report Section in Sidebar
+st.sidebar.markdown('<div class="sidebar-title" style="margin-top:1.2rem;">📄 Rapport Exporteren</div>', unsafe_allow_html=True)
+if st.sidebar.button("⚙️ Genereer PDF-rapport", use_container_width=True, help="Genereert het volledige PDF-rapport met kaarten, profielen, interpolatie, diepte-intervallen en statistieken."):
+    with st.spinner("PDF-rapport genereren…"):
+        pdf_data = generate_pdf_report(
+            df, df_coords, st.session_state.custom_profile,
+            interp_dx, interp_dy, interp_method,
+            anis_x, anis_y, use_bath_map, bath_raster_available, uploaded_bath_file,
+            bar_width, show_labels, selected_cmap_63, selected_cmap_d50
+        )
+        st.session_state.pdf_report_bytes = pdf_data
+
+if "pdf_report_bytes" in st.session_state and st.session_state.pdf_report_bytes:
+    st.sidebar.download_button(
+        label="📥 Download PDF-rapport",
+        data=st.session_state.pdf_report_bytes,
+        file_name=f"Geotechnisch_Profiel_Rapport_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
+
+st.sidebar.info("Selecteer boringen uit de keuzelijst of klik op markeringen op de kaart om uw profielpad op te bouwen.")
 
 # Calculate indices of selected boreholes in df_coords for Plotly Mapbox selection persistence
 selected_indices = []
@@ -1273,7 +1602,7 @@ if use_bath_map and bath_raster_available:
                     [1.00, "#08306b"]
                 ],
                 colorbar=dict(
-                    title="Bathymetry (m)",
+                    title="Bathymetrie (m)",
                     x=-0.08,
                     len=0.7,
                     thickness=12,
@@ -1281,7 +1610,7 @@ if use_bath_map and bath_raster_available:
                     tickfont=dict(size=10)
                 ),
                 hoverinfo='skip',
-                name="Bathymetry Map"
+                name="Bathymetriekaart"
             ))
     except Exception:
         pass
@@ -1298,7 +1627,7 @@ if len(st.session_state.custom_profile) >= 2:
         mode='lines',
         line=dict(color='#ef4444', width=2),
         hoverinfo='skip',
-        name='Profile Path',
+        name='Profielpad',
     ))
 
 # ── Build per-marker colour / size / text arrays ──────────────────────────────
@@ -1308,44 +1637,46 @@ marker_colors = []
 marker_sizes  = []
 marker_texts  = []
 
-for bh in df_coords['Boornummer']:
-    if bh in profile_set:
-        seq = profile_set[bh] + 1            # 1-based sequence number
-        marker_colors.append('#dc2626')      # red = selected in profile path sequence
-        marker_sizes.append(16)
-        marker_texts.append(f"<b>{seq}. {bh}</b>")
-    else:
-        marker_colors.append('#22c55e')      # green dot for all available boreholes
-        marker_sizes.append(10)
-        marker_texts.append(bh)              # show name for unselected
+if not df_coords.empty:
+    for bh in df_coords['Boornummer']:
+        if bh in profile_set:
+            seq = profile_set[bh] + 1            # 1-based sequence number
+            marker_colors.append('#dc2626')      # red = selected in profile path sequence
+            marker_sizes.append(16)
+            marker_texts.append(f"<b>{seq}. {bh}</b>")
+        else:
+            marker_colors.append('#22c55e')      # green dot for all available boreholes
+            marker_sizes.append(10)
+            marker_texts.append(bh)              # show name for unselected
 
 # ── Borehole Markers trace (rendered ON TOP of bathymetry & profile lines) ───
-fig_map.add_trace(go.Scattermapbox(
-    lat=df_coords['lat'],
-    lon=df_coords['lon'],
-    mode='markers+text',
-    marker=dict(
-        size=marker_sizes,
-        color=marker_colors,
-    ),
-    text=marker_texts,
-    textposition='top center',
-    textfont=dict(
-        size=10,
-        color='#1e1e24' if not IS_DARK else '#e4e4e7',
-    ),
-    hoverinfo='text',
-    hovertext=[
-        f"<b>Borehole: {row['Boornummer']}</b><br>"
-        f"UTM X: {row['X']:.1f}, Y: {row['Y']:.1f}<br>"
-        f"RD X: {row['X_RD']:.1f}, Y: {row['Y_RD']:.1f}<br>"
-        f"Lat: {row['lat']:.5f}, Lon: {row['lon']:.5f}<br>"
-        + (f"Bathymetry: {row['bathymetry']:.2f} m" if pd.notna(row.get('bathymetry')) else "Bathymetry: N/A")
-        for _, row in df_coords.iterrows()
-    ],
-    customdata=df_coords['Boornummer'].values,
-    name='All Boreholes',
-))
+if not df_coords.empty:
+    fig_map.add_trace(go.Scattermapbox(
+        lat=df_coords['lat'],
+        lon=df_coords['lon'],
+        mode='markers+text',
+        marker=dict(
+            size=marker_sizes,
+            color=marker_colors,
+        ),
+        text=marker_texts,
+        textposition='top center',
+        textfont=dict(
+            size=10,
+            color='#1e1e24' if not IS_DARK else '#e4e4e7',
+        ),
+        hoverinfo='text',
+        hovertext=[
+            f"<b>Boring: {row['Boornummer']}</b><br>"
+            f"UTM X: {row['X']:.1f}, Y: {row['Y']:.1f}<br>"
+            f"RD X: {row['X_RD']:.1f}, Y: {row['Y_RD']:.1f}<br>"
+            f"Lat: {row['lat']:.5f}, Lon: {row['lon']:.5f}<br>"
+            + (f"Bathymetrie: {row['bathymetry']:.2f} m" if pd.notna(row.get('bathymetry')) else "Bathymetrie: N/B")
+            for _, row in df_coords.iterrows()
+        ],
+        customdata=df_coords['Boornummer'].values,
+        name='Alle boringen',
+    ))
 
 # Generate Bathymetry Mapbox Layer overlay (explicitly rendered BELOW traces)
 mapbox_layers = []
@@ -1370,7 +1701,7 @@ if use_bath_map and bath_raster_available:
 fig_map.update_layout(
     mapbox=dict(
         style="open-street-map" if not IS_DARK else "carto-darkmatter",
-        center=dict(lat=df_coords['lat'].mean(), lon=df_coords['lon'].mean()),
+        center=dict(lat=df_coords['lat'].mean() if not df_coords.empty else 51.5, lon=df_coords['lon'].mean() if not df_coords.empty else 3.5),
         zoom=map_zoom_level,
         layers=mapbox_layers,
         uirevision="fixed_map_ui"
@@ -1384,7 +1715,7 @@ fig_map.update_layout(
     plot_bgcolor="rgba(0,0,0,0)",
 )
 
-st.markdown('<div class="chart-wrap"><div class="chart-header"><div class="chart-title">Boreholes Selection Map</div><div class="chart-subtitle">Click points sequentially to build your profile path. Use mouse scroll wheel, trackpad pinch, or sidebar slider to zoom in/out.</div></div>', unsafe_allow_html=True)
+st.markdown('<div class="chart-wrap"><div class="chart-header"><div class="chart-title">Kaart Boringselectie</div><div class="chart-subtitle">Klik opeenvolgend op punten om het profielpad op te bouwen. Gebruik het muiswiel, touchpad of de schuifbalk in de zijbalk om in/uit te zoomen.</div></div>', unsafe_allow_html=True)
 st.plotly_chart(
     fig_map, 
     use_container_width=True, 
@@ -1397,7 +1728,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # 9. Profile Analysis & Plotting Section
 if len(st.session_state.custom_profile) < 2:
-    st.info("💡 **Define a Profile Path**: Click on **two or more boreholes** on the map above. Once selected, their side-by-side profile transect will draw below, using true geographic distances.")
+    st.info("💡 **Definieer een profielpad**: Klik op **twee of meer boringen** op de bovenstaande kaart om een profieldoorsnede te genereren.")
 else:
     # 10. Generate distances along the selected path
     cum_dist = {}
@@ -1469,7 +1800,7 @@ else:
         is_bath_top = True
     else:
         if use_bath_map:
-            st.warning("⚠️ **Bathymetry Map Out of Bounds**: The selected borehole coordinates fall outside the bathymetry map coverage area. Using top surface elevation values from the Excel file.")
+            st.warning("⚠️ **Bathymetriekaart Buiten Bereik**: De geselecteerde coördinaten vallen buiten het bereik van de bathymetriekaart. Maaiveldhoogtes uit het Excel-bestand worden gebruikt.")
         top_points = []
         for bh in st.session_state.custom_profile:
             bh_df = prof_df[prof_df['Boornummer'] == bh]
@@ -1489,13 +1820,13 @@ else:
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">Selected Boreholes</div><div class="metric-value">{num_bh_selected}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-label">Geselecteerde boringen</div><div class="metric-value">{num_bh_selected}</div></div>', unsafe_allow_html=True)
     with col2:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">Profile Length</div><div class="metric-value">{profile_length:.1f} m</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-label">Profiellengte</div><div class="metric-value">{profile_length:.1f} m</div></div>', unsafe_allow_html=True)
     with col3:
         st.markdown(f'<div class="metric-card"><div class="metric-label">Gemiddelde %<0.063mm</div><div class="metric-value">{mean_63:.2f} %</div></div>', unsafe_allow_html=True)
     with col4:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">Average d50</div><div class="metric-value">{mean_d50:.2f} mm</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-label">Gemiddelde d50</div><div class="metric-value">{mean_d50:.2f} mm</div></div>', unsafe_allow_html=True)
 
     # 11. Plotly Subplots configuration
     fig_sub = make_subplots(
@@ -1672,7 +2003,7 @@ else:
     
     # Configure axes
     fig_sub.update_yaxes(
-        title_text="Depth below LAT (m)", 
+        title_text="Diepte t.o.v. LAT (m)", 
         autorange="reversed", 
         gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
         row=1, col=1
@@ -1704,22 +2035,22 @@ else:
     st.markdown('</div>', unsafe_allow_html=True)
 
     # ── 13. Interpolate Profile Button & Heatmaps ─────────────────────────────
-    st.markdown('<div class="chart-wrap"><div class="chart-header"><div class="chart-title">🧩 Interpolated Cross-Section</div><div class="chart-subtitle">Fill gaps between boreholes using image inpainting. Adjust dx / dy in the sidebar.</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-wrap"><div class="chart-header"><div class="chart-title">🧩 Geïnterpoleerde Dwarsdoorsnede</div><div class="chart-subtitle">Hiaten tussen boringen opvullen met inpainting. Pas dx / dy aan in de zijbalk.</div></div>', unsafe_allow_html=True)
 
     if not HAS_CV2 and interp_method.startswith("OpenCV"):
         st.warning(
-            "⚠️ **OpenCV not installed** – select a different method in the sidebar before running."
+            "⚠️ **OpenCV niet geïnstalleerd** – selecteer een andere methode in de zijbalk."
         )
 
     st.button(
-        "🧩 Interpolate Profile",
+        "🧩 Profiel Interpoleren",
         on_click=trigger_interpolation,
         use_container_width=False,
-        help="Rasterise borehole layers onto a 2-D grid and fill gaps with image inpainting.",
+        help="Rasteriseer boringlagen op een 2D grid en vul hiaten op met inpainting.",
     )
 
     if st.session_state.run_interpolation:
-        with st.spinner(f"Running interpolation ({interp_method})…"):
+        with st.spinner(f"Interpolatie uitvoeren ({interp_method})…"):
             try:
                 x63, y63, grid63 = interpolate_profile(
                     prof_df, cum_dist, top_points, bottom_points,
@@ -1758,7 +2089,7 @@ else:
                     gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
                 )
                 yaxis_common = dict(
-                    title="Depth below LAT (m)",
+                    title="Diepte t.o.v. LAT (m)",
                     autorange="reversed",
                     gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
                 )
@@ -1776,14 +2107,14 @@ else:
                     zmax=cmax_63,
                     colorbar=cb_63_heat,
                     connectgaps=False,
-                    hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>%<0.063mm: %{customdata:.2f}%<extra></extra>" if selected_cmap_63 == 'Custom (Discrete)' else "Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>%<0.063mm: %{z:.2f}%<extra></extra>",
+                    hovertemplate="Afstand: %{x:.0f} m<br>Diepte: %{y:.2f} m<br>%<0.063mm: %{customdata:.2f}%<extra></extra>" if selected_cmap_63 == 'Custom (Discrete)' else "Afstand: %{x:.0f} m<br>Diepte: %{y:.2f} m<br>%<0.063mm: %{z:.2f}%<extra></extra>",
                 ))
                 fig63.add_trace(go.Scatter(
                     x=top_x, y=top_y,
                     mode='lines' if is_bath_top else 'lines+markers',
                     line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2.5),
                     marker=dict(size=6, color='#ef4444') if not is_bath_top else None,
-                    hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Ligging zeebodem (ALAT)</extra>",
+                    hovertemplate="Afstand: %{x:.1f} m<br>Bathymetrie Diepte: %{y:.2f} m (LAT)<extra>Ligging zeebodem (ALAT)</extra>",
                     name='Ligging zeebodem (ALAT)'
                 ))
                 fig63.add_trace(go.Scatter(
@@ -1794,13 +2125,13 @@ else:
                     name='Einddiepte boring (ALAT)'
                 ))
                 fig63.update_layout(
-                    title="<b>(%)<0.063mm – geinterpoleerd</b>",
+                    title="<b>%<0.063mm – Geïnterpoleerd</b>",
                     template="plotly_dark" if is_dark_plot else "plotly_white",
                     height=420,
                     margin=dict(l=60, r=20, t=60, b=50),
                     paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
                     plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
-                    xaxis=dict(title="Distance along profile path (m)", **axis_common),
+                    xaxis=dict(title="Afstand langs profiel (m)", **axis_common),
                     yaxis=dict(**yaxis_common),
                     legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
                 )
@@ -1818,14 +2149,14 @@ else:
                     zmax=cmax_d50,
                     colorbar=cb_d50_heat,
                     connectgaps=False,
-                    hovertemplate="Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>d50: %{customdata:.2f} mm<extra></extra>" if selected_cmap_d50 == 'Custom (Discrete)' else "Dist: %{x:.0f} m<br>Depth: %{y:.2f} m<br>d50: %{z:.2f} mm<extra></extra>",
+                    hovertemplate="Afstand: %{x:.0f} m<br>Diepte: %{y:.2f} m<br>d50: %{customdata:.2f} mm<extra></extra>" if selected_cmap_d50 == 'Custom (Discrete)' else "Afstand: %{x:.0f} m<br>Diepte: %{y:.2f} m<br>d50: %{z:.2f} mm<extra></extra>",
                 ))
                 fig_d50.add_trace(go.Scatter(
                     x=top_x, y=top_y,
                     mode='lines' if is_bath_top else 'lines+markers',
                     line=dict(color='#ef4444' if not is_dark_plot else '#fca5a5', width=2.5),
                     marker=dict(size=6, color='#ef4444') if not is_bath_top else None,
-                    hovertemplate="Dist: %{x:.1f} m<br>Bathymetry Depth: %{y:.2f} m (LAT)<extra>Ligging zeebodem (ALAT)</extra>",
+                    hovertemplate="Afstand: %{x:.1f} m<br>Bathymetrie Diepte: %{y:.2f} m (LAT)<extra>Ligging zeebodem (ALAT)</extra>",
                     name='Ligging zeebodem (ALAT)'
                 ))
                 fig_d50.add_trace(go.Scatter(
@@ -1836,13 +2167,13 @@ else:
                     name='Einddiepte boring (ALAT)'
                 ))
                 fig_d50.update_layout(
-                    title="<b>d50 (mm) – geinterpoleerd</b>",
+                    title="<b>d50 (mm) – Geïnterpoleerd</b>",
                     template="plotly_dark" if is_dark_plot else "plotly_white",
                     height=420,
                     margin=dict(l=60, r=20, t=60, b=50),
                     paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
                     plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
-                    xaxis=dict(title="Distance along profile path (m)", **axis_common),
+                    xaxis=dict(title="Afstand langs profiel (m)", **axis_common),
                     yaxis=dict(**yaxis_common),
                     legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
                 )
