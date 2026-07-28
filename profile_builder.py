@@ -2435,8 +2435,8 @@ if show_depth_maps:
                 margin=dict(l=60, r=80, t=80, b=60),
                 paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
                 plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
-                xaxis2=dict(title="X Coordinate (UTM)", scaleanchor="y2", scaleratio=1),
-                yaxis=dict(title="Y Coordinate (UTM)"),
+                xaxis2=dict(title="X  (UTM)", scaleanchor="y2", scaleratio=1),
+                yaxis=dict(title="Y  (UTM)"),
                 yaxis2=dict(title=""),
                 legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
             )
