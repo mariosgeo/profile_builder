@@ -2227,7 +2227,7 @@ if show_depth_maps:
             depth_lo = depth_val - 0.5
             depth_hi = depth_val + 0.5
 
-            st.markdown(f'<h4 style="margin-top:1.5rem;">Depth: {depth_lo:.2f} – {depth_hi:.2f} m ALAT</h4>', unsafe_allow_html=True)
+            st.markdown(f'<h4 style="margin-top:1.5rem;">Diepte: {depth_lo:.2f} – {depth_hi:.2f} m ALAT</h4>', unsafe_allow_html=True)
 
             fig_depth = make_subplots(
                 rows=1, cols=2,
@@ -2249,9 +2249,9 @@ if show_depth_maps:
                             y=missing_bh['Y'],
                             mode='markers',
                             marker=dict(size=8, color='#d4d4d4', symbol='circle', line=dict(color='#a3a3a3', width=0.5)),
-                            name='No data at this depth' if col_idx == 1 else '',
+                            name='Geen data op dit diepte interval' if col_idx == 1 else '',
                             showlegend=(col_idx == 1),
-                            hovertext=[f"Borehole: {bh}<br>(no layer at this depth)" for bh in missing_bh['Boornummer']],
+                            hovertext=[f"Boring: {bh}<br>(geen laag op dit interval)" for bh in missing_bh['Boornummer']],
                             hoverinfo='text',
                         ),
                         row=1, col=col_idx
@@ -2273,7 +2273,7 @@ if show_depth_maps:
                         textposition='top center',
                         textfont=dict(size=9),
                         hovertext=[
-                            f"Borehole: {row['Boornummer']}<br>%<0.063mm: {row['63calculated. met zoutcorrectie']:.2f}%"
+                            f"Boring: {row['Boornummer']}<br>%<0.063mm: {row['63calculated. met zoutcorrectie']:.2f}%"
                             for _, row in valid_63.iterrows()
                         ],
                         hoverinfo='text',
@@ -2289,7 +2289,7 @@ if show_depth_maps:
                         y=nan_63['Y'],
                         mode='markers',
                         marker=dict(size=12, color='#999999', symbol='x', line=dict(color='black', width=0.5)),
-                        name='Missing / NaN',
+                        name='Ontbrekend / NaN',
                         showlegend=True
                     ),
                     row=1, col=1
@@ -2306,7 +2306,7 @@ if show_depth_maps:
                             y=dino_sel['Y'],
                             mode='markers',
                             marker=dict(size=20, color='rgba(0,0,0,0)', line=dict(color='black', width=2)),
-                            name='DINO Borehole',
+                            name='Data uit DINO-database',
                             showlegend=True,
                         ),
                         row=1, col=1
@@ -2328,7 +2328,7 @@ if show_depth_maps:
                         textposition='top center',
                         textfont=dict(size=9),
                         hovertext=[
-                            f"Borehole: {row['Boornummer']}<br>d50: {row['d50']:.3f} mm"
+                            f"Boring: {row['Boornummer']}<br>d50: {row['d50']:.3f} mm"
                             for _, row in valid_d50.iterrows()
                         ],
                         hoverinfo='text',
@@ -2344,7 +2344,7 @@ if show_depth_maps:
                         y=nan_d50['Y'],
                         mode='markers',
                         marker=dict(size=12, color='#999999', symbol='x', line=dict(color='black', width=0.5)),
-                        name='Missing / NaN',
+                        name='Ontbrekend / NaN',
                         showlegend=False,
                     ),
                     row=1, col=2
@@ -2424,12 +2424,17 @@ if show_depth_maps:
             )
 
             fig_depth.update_layout(
+                title=dict(
+                    text=f"<b>Diepte-interval: {depth_lo:.2f} – {depth_hi:.2f} m ALAT</b>",
+                    x=0.5,
+                    xanchor="center",
+                    font=dict(size=15)
+                ),
                 template="plotly_dark" if is_dark_plot else "plotly_white",
-                height=500,
-                margin=dict(l=60, r=80, t=60, b=60),
+                height=520,
+                margin=dict(l=60, r=80, t=80, b=60),
                 paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
                 plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
-                xaxis=dict(title="X Coordinate (UTM)", scaleanchor="y", scaleratio=1),
                 xaxis2=dict(title="X Coordinate (UTM)", scaleanchor="y2", scaleratio=1),
                 yaxis=dict(title="Y Coordinate (UTM)"),
                 yaxis2=dict(title=""),
