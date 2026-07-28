@@ -1334,6 +1334,12 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 for _, row in valid_63.iterrows():
                     ax_d63.annotate(f"{row['63calculated. met zoutcorrectie']:.1f}%", (row['X'], row['Y']), fontsize=6.5, fontweight='bold', ha='center', va='bottom', xytext=(0,3), textcoords='offset points')
 
+            # DINO boreholes hollow circle overlay
+            if 'DINO' in sel.columns:
+                dino_sel = sel[sel['DINO'] == 1]
+                if not dino_sel.empty:
+                    ax_d63.scatter(dino_sel['X'], dino_sel['Y'], s=150, facecolors='none', edgecolors='black', linewidth=1.5, label='Data uit DINO-database', zorder=5)
+
             ax_d63.set_title("%<0.063mm", fontsize=11, fontweight='bold')
             ax_d63.set_xlabel("X (UTM)", fontsize=9)
             ax_d63.set_ylabel("Y (UTM)", fontsize=9)
@@ -1351,6 +1357,11 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 ax_dd50.scatter(valid_d50['X'], valid_d50['Y'], color=cd50_arr, s=65, edgecolor='black', linewidth=0.5, label='d50 (mm)')
                 for _, row in valid_d50.iterrows():
                     ax_dd50.annotate(f"{row['d50']:.2f}", (row['X'], row['Y']), fontsize=6.5, fontweight='bold', ha='center', va='bottom', xytext=(0,3), textcoords='offset points')
+
+            if 'DINO' in sel.columns:
+                dino_sel = sel[sel['DINO'] == 1]
+                if not dino_sel.empty:
+                    ax_dd50.scatter(dino_sel['X'], dino_sel['Y'], s=150, facecolors='none', edgecolors='black', linewidth=1.5, label='Data uit DINO-database', zorder=5)
 
             ax_dd50.set_title("d50 (mm)", fontsize=11, fontweight='bold')
             ax_dd50.set_xlabel("X (UTM)", fontsize=9)
