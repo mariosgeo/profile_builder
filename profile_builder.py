@@ -985,11 +985,11 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                         anis_x, anis_y, use_bath_map, bath_raster_available, uploaded_bath_file,
                         bar_width, show_labels, selected_cmap_63, selected_cmap_d50):
     """
-    Generates a comprehensive multi-page PDF report with:
-    - Cover page: Summary statistics, dataset info, interpolation settings & location map
-    - Profile page: Silt/Clay (%<0.063mm) and d50 borehole profile transects
-    - Interpolation page: 2D interpolated cross-sections for %<0.063mm and d50
-    - Depth-slices pages: Spatial scatter plots of %<0.063mm and d50 per unique depth slice across all boreholes
+    Generates a high-quality multi-page PDF report in landscape orientation (A4).
+    - Page 1: Cover Summary (Dataset stats, selected profile, interpolation settings & location map)
+    - Page 2: Borehole Transect Profiles (%<0.063mm and d50 with seabed & end depth lines)
+    - Page 3: 2D Interpolated Cross-Sections (%<0.063mm and d50 with discrete colorbars and bathymetry overlay)
+    - Pages 4+: Depth-Slice Spatial Maps for every depth interval across all boreholes
     """
     import io
     import datetime
@@ -1003,7 +1003,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
     num_total_bh = len(df_coords)
     num_sel_bh = len(custom_profile)
     
-    # Calculate profile distances
+    # Calculate profile cumulative distances
     cum_dist = {}
     last_x, last_y = None, None
     current_dist = 0.0
@@ -1020,51 +1020,117 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
 
     prof_df = df[df['Boornummer'].isin(custom_profile)].copy() if custom_profile else pd.DataFrame()
 
+    # Get continuous bathymetry or borehole tops/bottoms
+    top_points = []
+    bottom_points = []
+    is_bath_top = False
+
+    if len(custom_profile) >= 2:
+        bath_bytes = uploaded_bath_file.getvalue() if (use_bath_map and uploaded_bath_file is not None) else None
+        bath_sampled = get_profile_bathymetry(custom_profile, df_coords, bath_file_bytes=bath_bytes if bath_raster_available else None, step_m=5.0)
+        if bath_sampled and len(bath_sampled) > 1:
+            top_points = bath_sampled
+            is_bath_top = True
+        else:
+            for bh in custom_profile:
+                bh_df = prof_df[prof_df['Boornummer'] == bh]
+                if not bh_df.empty and bh_df['Tra_van_lat'].notna().any():
+                    top_points.append((cum_dist[bh], float(bh_df['Tra_van_lat'].min())))
+                else:
+                    top_points.append((cum_dist[bh], 0.0))
+
+        for bh in custom_profile:
+            bh_df = prof_df[prof_df['Boornummer'] == bh]
+            if not bh_df.empty and bh_df['Tra_tot_lat'].notna().any():
+                bottom_points.append((cum_dist[bh], float(bh_df['Tra_tot_lat'].max())))
+            else:
+                d_x = cum_dist[bh]
+                top_y = dict(top_points).get(d_x, 10.0)
+                bottom_points.append((d_x, top_y + 5.0))
+
+    # Discrete Colormaps setup for Matplotlib
+    n_b63 = len(SILT_BINS) - 1
+    cmap63_src = mcolors.LinearSegmentedColormap.from_list("c63", HEX_COLORS)
+    cols63_hex = [mcolors.to_hex(cmap63_src(i / max(1, n_b63 - 1))) for i in range(n_b63)]
+    cmap63_np = mcolors.ListedColormap(cols63_hex)
+    norm63_np = mcolors.BoundaryNorm(SILT_BINS, n_b63)
+
+    n_bd50 = len(D50_BINS) - 1
+    cmapd50_src = mcolors.LinearSegmentedColormap.from_list("cd50", HEX_COLORS)
+    cols_d50_hex = [mcolors.to_hex(cmapd50_src(i / max(1, n_bd50 - 1))) for i in range(n_bd50)]
+    cmapd50_np = mcolors.ListedColormap(cols_d50_hex)
+    normd50_np = mcolors.BoundaryNorm(D50_BINS, n_bd50)
+
     with PdfPages(buf) as pdf:
-        # ── Page 1: Samenvatting, Statistieken & Kaart ────────────────────────
-        fig1 = plt.figure(figsize=(8.27, 11.69)) # A4 portrait
+        # ══════════════════════════════════════════════════════════════════════
+        # PAGE 1: COVER / SUMMARY & OVERVIEW MAP (Landscape A4: 11.69 x 8.27 in)
+        # ══════════════════════════════════════════════════════════════════════
+        fig1 = plt.figure(figsize=(11.69, 8.27))
         fig1.patch.set_facecolor('#ffffff')
-        
-        plt.figtext(0.08, 0.94, "GEOTECHNISCH PROFIEL & DIEPTE-INTERVAL RAPPORT", fontsize=14, fontweight='bold', color='#1e1e24')
-        plt.figtext(0.08, 0.925, f"Gegenereerd op: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", fontsize=9, color='#666666')
-        
-        # Summary text block
+
+        # Header Title
+        plt.figtext(0.05, 0.93, "GEOTECHNISCH PROFIEL & DIEPTE-INTERVAL RAPPORT", fontsize=16, fontweight='bold', color='#0f172a')
+        plt.figtext(0.05, 0.905, f"Rapport gegenereerd op: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", fontsize=9, color='#475569')
+        plt.figtext(0.05, 0.895, "_" * 135, fontsize=8, color='#cbd5e1')
+
+        # Left Column Panel (Info & Statistics text)
+        ax_text = fig1.add_axes([0.05, 0.08, 0.44, 0.78])
+        ax_text.axis('off')
+
         silt_prof_mean = prof_df['63calculated. met zoutcorrectie'].mean() if not prof_df.empty else np.nan
         silt_prof_min = prof_df['63calculated. met zoutcorrectie'].min() if not prof_df.empty else np.nan
         silt_prof_max = prof_df['63calculated. met zoutcorrectie'].max() if not prof_df.empty else np.nan
-        
+
         d50_prof_mean = prof_df['d50'].mean() if not prof_df.empty else np.nan
         d50_prof_min = prof_df['d50'].min() if not prof_df.empty else np.nan
         d50_prof_max = prof_df['d50'].max() if not prof_df.empty else np.nan
 
-        summary_text = (
-            "1. ALGEMENE INFORMATIE & STATISTIEKEN\n"
-            "---------------------------------------------------------------------------------------------------------\n"
-            f"• Totaal aantal boringen in bestand : {num_total_bh}\n"
-            f"• Geselecteerde boringen in profiel ({num_sel_bh}): {', '.join(custom_profile) if custom_profile else 'Geen geselecteerd'}\n"
-            f"• Profiellengte: {current_dist:.1f} m\n\n"
-            "   Profielstatistieken:\n"
-            f"     - %<0.063mm : Gemiddelde = {silt_prof_mean:.2f}%, Min = {silt_prof_min:.2f}%, Max = {silt_prof_max:.2f}%\n"
-            f"     - d50 (mm)  : Gemiddelde = {d50_prof_mean:.3f} mm, Min = {d50_prof_min:.3f} mm, Max = {d50_prof_max:.3f} mm\n\n"
-            "2. INTERPOLATIE INSTELLINGEN\n"
-            "---------------------------------------------------------------------------------------------------------\n"
-            f"• Horizontale stap dx: {interp_dx:.1f} m  |  Dieptestap dy: {interp_dy:.2f} m\n"
-            f"• Interpolatiemethode: {interp_method}\n"
-            f"• Anisotropie (Laagcontinuïteit): Horizontaal (X) = {anis_x:.2f}, Verticaal (Y) = {anis_y:.2f}\n"
-            f"• Bathymetriekaart Modus: {'Actief' if (use_bath_map and bath_raster_available) else 'Niet beschikbaar'}\n"
-        )
-        plt.figtext(0.08, 0.64, summary_text, fontsize=9.5, family='monospace', verticalalignment='top')
+        sel_bh_str = ", ".join(custom_profile) if custom_profile else "Geen"
+        if len(sel_bh_str) > 60:
+            sel_bh_str = sel_bh_str[:57] + "..."
 
-        # Map Subplot on lower part of Page 1
-        ax_map = fig1.add_axes([0.1, 0.08, 0.8, 0.50])
-        ax_map.set_title("Kaart Boringselectie & Profielpad", fontsize=11, fontweight='bold', pad=10)
-        
-        # Plot all boreholes
-        ax_map.scatter(df_coords['X'], df_coords['Y'], color='#22c55e', s=40, zorder=3, label='Alle boringen')
-        for _, row in df_coords.iterrows():
-            ax_map.annotate(row['Boornummer'], (row['X'], row['Y']), fontsize=7, textcoords="offset points", xytext=(0,4), ha='center')
-        
-        # Plot selected profile path
+        text_lines = [
+            ("1. ALGEMENE INFORMATIE", True, 12, '#0f172a'),
+            (f"• Totaal aantal boringen in bestand: {num_total_bh}", False, 9.5, '#334155'),
+            (f"• Geselecteerde boringen in profiel ({num_sel_bh}):", False, 9.5, '#334155'),
+            (f"   {sel_bh_str}", False, 9, '#1e293b'),
+            (f"• Profiellengte: {current_dist:.1f} m", False, 9.5, '#334155'),
+            ("", False, 6, ''),
+            ("2. PROFIELSTATISTIEKEN", True, 12, '#0f172a'),
+            ("• Percentage (%) < 0.063mm (Silt / Clay):", True, 9.5, '#1e293b'),
+            (f"   - Gemiddelde : {silt_prof_mean:.2f} %", False, 9, '#334155'),
+            (f"   - Minimum    : {silt_prof_min:.2f} %  |  Maximum: {silt_prof_max:.2f} %", False, 9, '#334155'),
+            ("• Korrelgrootte d50 (mm):", True, 9.5, '#1e293b'),
+            (f"   - Gemiddelde : {d50_prof_mean:.3f} mm", False, 9, '#334155'),
+            (f"   - Minimum    : {d50_prof_min:.3f} mm  |  Maximum: {d50_prof_max:.3f} mm", False, 9, '#334155'),
+            ("", False, 6, ''),
+            ("3. INTERPOLATIE INSTELLINGEN", True, 12, '#0f172a'),
+            (f"• Grid stapgrootte: dx = {interp_dx:.1f} m, dy = {interp_dy:.2f} m", False, 9.5, '#334155'),
+            (f"• Algoritme / Methode: {interp_method}", False, 9.5, '#334155'),
+            (f"• Anisotropie gewichten: X = {anis_x:.2f}, Y = {anis_y:.2f}", False, 9.5, '#334155'),
+            (f"• Bathymetriekaart: {'Actief (EPSG:25831)' if (use_bath_map and bath_raster_available) else 'Niet actief'}", False, 9.5, '#334155'),
+        ]
+
+        y_pos = 0.98
+        for text, is_bold, sz, col in text_lines:
+            if not text:
+                y_pos -= 0.02
+                continue
+            weight = 'bold' if is_bold else 'normal'
+            ax_text.text(0.0, y_pos, text, transform=ax_text.transAxes,
+                         fontsize=sz, fontweight=weight, color=col, va='top')
+            y_pos -= (0.05 if is_bold and sz == 12 else 0.04)
+
+        # Right Column Map (Overview map)
+        ax_map = fig1.add_axes([0.53, 0.08, 0.42, 0.78])
+        ax_map.set_title("Kaart Boringselectie & Profielpad", fontsize=12, fontweight='bold', pad=10, color='#0f172a')
+
+        if not df_coords.empty:
+            ax_map.scatter(df_coords['X'], df_coords['Y'], color='#22c55e', s=35, zorder=3, label='Alle boringen')
+            for _, row in df_coords.iterrows():
+                ax_map.annotate(row['Boornummer'], (row['X'], row['Y']), fontsize=6.5, color='#334155',
+                                textcoords="offset points", xytext=(0, 4), ha='center')
+
         if len(custom_profile) >= 2:
             prof_xs = []
             prof_ys = []
@@ -1073,89 +1139,102 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 if not r.empty:
                     prof_xs.append(r['X'].iloc[0])
                     prof_ys.append(r['Y'].iloc[0])
-            ax_map.plot(prof_xs, prof_ys, color='#dc2626', linewidth=2, linestyle='-', zorder=4, label='Profielpad')
-            ax_map.scatter(prof_xs, prof_ys, color='#dc2626', s=80, zorder=5)
+            ax_map.plot(prof_xs, prof_ys, color='#dc2626', linewidth=2.2, linestyle='-', zorder=4, label='Profielpad')
+            ax_map.scatter(prof_xs, prof_ys, color='#dc2626', s=70, zorder=5)
             for idx, (px, py, pbh) in enumerate(zip(prof_xs, prof_ys, custom_profile)):
-                ax_map.annotate(f"{idx+1}. {pbh}", (px, py), fontsize=8, fontweight='bold', color='#dc2626', textcoords="offset points", xytext=(0,6), ha='center')
+                ax_map.annotate(f"{idx+1}. {pbh}", (px, py), fontsize=7.5, fontweight='bold', color='#b91c1c',
+                                textcoords="offset points", xytext=(0, 6), ha='center')
 
         ax_map.set_xlabel("X (UTM)", fontsize=9)
         ax_map.set_ylabel("Y (UTM)", fontsize=9)
-        ax_map.grid(True, linestyle='--', alpha=0.4)
-        ax_map.legend(loc='upper right', fontsize=8)
+        ax_map.grid(True, linestyle='--', alpha=0.3)
+        ax_map.legend(loc='upper right', fontsize=8, framealpha=0.9)
         ax_map.set_aspect('equal', 'datalim')
 
         pdf.savefig(fig1)
         plt.close(fig1)
 
-        # ── Page 2: Boringen Profieldoorsneden ────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════════
+        # PAGE 2: BOREHOLE TRANSECT PROFILES (Landscape A4)
+        # ══════════════════════════════════════════════════════════════════════
         if len(custom_profile) >= 2 and not prof_df.empty:
-            fig2, (ax_silt, ax_d50) = plt.subplots(2, 1, figsize=(8.27, 11.69))
-            fig2.suptitle("Boringen Profieldoorsneden", fontsize=14, fontweight='bold', y=0.95)
-            
-            # Subplot 1: %<0.063mm bar profile
+            fig2, (ax_silt, ax_d50) = plt.subplots(2, 1, figsize=(11.69, 8.27))
+            fig2.suptitle("Boringen Profieldoorsneden", fontsize=15, fontweight='bold', y=0.96, color='#0f172a')
+            fig2.subplots_adjust(left=0.08, right=0.88, top=0.90, bottom=0.08, hspace=0.35)
+
+            plot_width = max(30.0, current_dist / max(1, len(custom_profile) * 2.5))
+
+            # ── Subplot 1: %<0.063mm Profile ─────────────────────────────────
             silt_df = prof_df[prof_df['63calculated. met zoutcorrectie'].notna()].copy()
             if not silt_df.empty:
                 silt_heights = silt_df['Tra_tot_lat'] - silt_df['Tra_van_lat']
                 silt_bottoms = silt_df['Tra_van_lat']
                 silt_xs = [cum_dist[bh] for bh in silt_df['Boornummer']]
+                bar_cols = [get_bin_color(v, SILT_BINS, cols63_hex) for v in silt_df['63calculated. met zoutcorrectie']]
                 
-                n_b63 = len(SILT_BINS) - 1
-                cmap63_src = mcolors.LinearSegmentedColormap.from_list("c63", HEX_COLORS)
-                cols63 = [mcolors.to_hex(cmap63_src(i / max(1, n_b63 - 1))) for i in range(n_b63)]
-                bar_cols = [get_bin_color(v, SILT_BINS, cols63) for v in silt_df['63calculated. met zoutcorrectie']]
-                
-                ax_silt.bar(silt_xs, silt_heights, bottom=silt_bottoms, width=bar_width, color=bar_cols, edgecolor='black', linewidth=0.3)
+                ax_silt.bar(silt_xs, silt_heights, bottom=silt_bottoms, width=plot_width, color=bar_cols, edgecolor='black', linewidth=0.4, zorder=3)
                 if show_labels:
                     for x_val, bot_val, h_val, v_val in zip(silt_xs, silt_bottoms, silt_heights, silt_df['63calculated. met zoutcorrectie']):
-                        ax_silt.text(x_val, bot_val + h_val/2, f"{v_val:.1f}%", ha='center', va='center', fontsize=6, color='black')
+                        ax_silt.text(x_val, bot_val + h_val/2, f"{v_val:.1f}%", ha='center', va='center', fontsize=6.5, color='black', fontweight='bold')
 
-            ax_silt.set_title("Percentage (%) < 0.063mm", fontsize=11, fontweight='bold')
+            if top_points:
+                ax_silt.plot([p[0] for p in top_points], [p[1] for p in top_points], color='#ef4444', linewidth=2, label='Ligging zeebodem (ALAT)', zorder=4)
+            if bottom_points:
+                ax_silt.plot([p[0] for p in bottom_points], [p[1] for p in bottom_points], color='#3b82f6', linewidth=1.5, linestyle='--', label='Einddiepte (ALAT)', zorder=4)
+
+            ax_silt.set_title("Percentage (%) < 0.063mm", fontsize=11, fontweight='bold', loc='left')
             ax_silt.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
             ax_silt.set_xlabel("Lengte langs profiel (m)", fontsize=9)
             ax_silt.invert_yaxis()
-            ax_silt.grid(True, linestyle='--', alpha=0.4)
-            
-            # Subplot 2: d50 bar profile
+            ax_silt.grid(True, linestyle='--', alpha=0.3)
+            ax_silt.legend(loc='upper right', fontsize=8, framealpha=0.9)
+
+            cax63 = fig2.add_axes([0.90, 0.54, 0.015, 0.34])
+            cb63 = fig2.colorbar(plt.cm.ScalarMappable(norm=norm63_np, cmap=cmap63_np), cax=cax63)
+            cb63.set_label("%<0.063mm", fontsize=8)
+            cb63.ax.tick_params(labelsize=7)
+
+            # ── Subplot 2: d50 Profile ───────────────────────────────────────
             d50_df = prof_df[prof_df['d50'].notna()].copy()
             if not d50_df.empty:
                 d50_heights = d50_df['Tra_tot_lat'] - d50_df['Tra_van_lat']
                 d50_bottoms = d50_df['Tra_van_lat']
                 d50_xs = [cum_dist[bh] for bh in d50_df['Boornummer']]
+                bar_cols_d50 = [get_bin_color(v, D50_BINS, cols_d50_hex) for v in d50_df['d50']]
                 
-                n_bd50 = len(D50_BINS) - 1
-                cmapd50_src = mcolors.LinearSegmentedColormap.from_list("cd50", HEX_COLORS)
-                cols_d50 = [mcolors.to_hex(cmapd50_src(i / max(1, n_bd50 - 1))) for i in range(n_bd50)]
-                bar_cols_d50 = [get_bin_color(v, D50_BINS, cols_d50) for v in d50_df['d50']]
-                
-                ax_d50.bar(d50_xs, d50_heights, bottom=d50_bottoms, width=bar_width, color=bar_cols_d50, edgecolor='black', linewidth=0.3)
+                ax_d50.bar(d50_xs, d50_heights, bottom=d50_bottoms, width=plot_width, color=bar_cols_d50, edgecolor='black', linewidth=0.4, zorder=3)
                 if show_labels:
                     for x_val, bot_val, h_val, v_val in zip(d50_xs, d50_bottoms, d50_heights, d50_df['d50']):
-                        ax_d50.text(x_val, bot_val + h_val/2, f"{v_val:.2f}", ha='center', va='center', fontsize=6, color='black')
+                        ax_d50.text(x_val, bot_val + h_val/2, f"{v_val:.2f}", ha='center', va='center', fontsize=6.5, color='black', fontweight='bold')
 
-            ax_d50.set_title("d50 (mm)", fontsize=11, fontweight='bold')
+            if top_points:
+                ax_d50.plot([p[0] for p in top_points], [p[1] for p in top_points], color='#ef4444', linewidth=2, label='Ligging zeebodem (ALAT)', zorder=4)
+            if bottom_points:
+                ax_d50.plot([p[0] for p in bottom_points], [p[1] for p in bottom_points], color='#3b82f6', linewidth=1.5, linestyle='--', label='Einddiepte (ALAT)', zorder=4)
+
+            ax_d50.set_title("d50 (mm)", fontsize=11, fontweight='bold', loc='left')
             ax_d50.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
             ax_d50.set_xlabel("Lengte langs profiel (m)", fontsize=9)
             ax_d50.invert_yaxis()
-            ax_d50.grid(True, linestyle='--', alpha=0.4)
-            
-            plt.tight_layout(rect=[0, 0, 1, 0.93])
+            ax_d50.grid(True, linestyle='--', alpha=0.3)
+            ax_d50.legend(loc='upper right', fontsize=8, framealpha=0.9)
+
+            caxd50 = fig2.add_axes([0.90, 0.08, 0.015, 0.34])
+            cbd50 = fig2.colorbar(plt.cm.ScalarMappable(norm=normd50_np, cmap=cmapd50_np), cax=caxd50)
+            cbd50.set_label("d50 (mm)", fontsize=8)
+            cbd50.ax.tick_params(labelsize=7)
+
             pdf.savefig(fig2)
             plt.close(fig2)
 
-        # ── Page 3: Geïnterpoleerde Dwarsdoorsneden ─────────────────────────────
+        # ══════════════════════════════════════════════════════════════════════
+        # PAGE 3: INTERPOLATED CROSS-SECTIONS (Landscape A4)
+        # ══════════════════════════════════════════════════════════════════════
         if len(custom_profile) >= 2:
-            top_pts = []
-            bot_pts = []
-            for bh in custom_profile:
-                bh_df = prof_df[prof_df['Boornummer'] == bh]
-                if not bh_df.empty and bh_df['Tra_van_lat'].notna().any():
-                    top_pts.append((cum_dist[bh], float(bh_df['Tra_van_lat'].min())))
-                    bot_pts.append((cum_dist[bh], float(bh_df['Tra_tot_lat'].max())))
-                else:
-                    top_pts.append((cum_dist[bh], 0.0))
-                    top_pts.append((cum_dist[bh], 10.0))
-
             try:
+                top_pts = top_points if top_points else [(cum_dist[bh], 0.0) for bh in custom_profile]
+                bot_pts = bottom_points if bottom_points else [(cum_dist[bh], 10.0) for bh in custom_profile]
+
                 x63, y63, grid63 = interpolate_profile(
                     prof_df, cum_dist, top_pts, bot_pts,
                     interp_dx, interp_dy,
@@ -1173,51 +1252,57 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                     anis_y=anis_y
                 )
 
-                fig3, (ax_inp63, ax_inpd50) = plt.subplots(2, 1, figsize=(8.27, 11.69))
-                fig3.suptitle("Geïnterpoleerde Dwarsdoorsneden", fontsize=14, fontweight='bold', y=0.95)
-
-                cmap63_src = mcolors.LinearSegmentedColormap.from_list("c63", HEX_COLORS)
-                cols63 = [cmap63_src(i / max(1, len(SILT_BINS)-2)) for i in range(len(SILT_BINS)-1)]
-                cmap63_np = mcolors.ListedColormap(cols63)
-                norm63_np = mcolors.BoundaryNorm(SILT_BINS, len(SILT_BINS)-1)
+                fig3, (ax_inp63, ax_inpd50) = plt.subplots(2, 1, figsize=(11.69, 8.27))
+                fig3.suptitle("Geïnterpoleerde Dwarsdoorsneden", fontsize=15, fontweight='bold', y=0.96, color='#0f172a')
+                fig3.subplots_adjust(left=0.08, right=0.88, top=0.90, bottom=0.08, hspace=0.35)
 
                 im63 = ax_inp63.pcolormesh(x63, y63, grid63, cmap=cmap63_np, norm=norm63_np, shading='auto')
-                ax_inp63.set_title("%<0.063mm – Geïnterpoleerd", fontsize=11, fontweight='bold')
+                if top_points:
+                    ax_inp63.plot([p[0] for p in top_points], [p[1] for p in top_points], color='#ef4444', linewidth=2, label='Ligging zeebodem (ALAT)')
+                if bottom_points:
+                    ax_inp63.plot([p[0] for p in bottom_points], [p[1] for p in bottom_points], color='#3b82f6', linewidth=1.5, linestyle='--', label='Einddiepte (ALAT)')
+
+                ax_inp63.set_title("%<0.063mm – Geïnterpoleerd", fontsize=11, fontweight='bold', loc='left')
                 ax_inp63.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
                 ax_inp63.set_xlabel("Lengte langs profiel (m)", fontsize=9)
                 ax_inp63.invert_yaxis()
-                fig3.colorbar(im63, ax=ax_inp63, label="%<0.063mm")
+                ax_inp63.grid(True, linestyle='--', alpha=0.3)
+                ax_inp63.legend(loc='upper right', fontsize=8, framealpha=0.9)
 
-                cmapd50_src = mcolors.LinearSegmentedColormap.from_list("cd50", HEX_COLORS)
-                cols_d50 = [cmapd50_src(i / max(1, len(D50_BINS)-2)) for i in range(len(D50_BINS)-1)]
-                cmapd50_np = mcolors.ListedColormap(cols_d50)
-                normd50_np = mcolors.BoundaryNorm(D50_BINS, len(D50_BINS)-1)
+                cax_i63 = fig3.add_axes([0.90, 0.54, 0.015, 0.34])
+                cb_i63 = fig3.colorbar(im63, cax=cax_i63)
+                cb_i63.set_label("%<0.063mm", fontsize=8)
+                cb_i63.ax.tick_params(labelsize=7)
 
                 imd50 = ax_inpd50.pcolormesh(xd50, yd50, gridd50, cmap=cmapd50_np, norm=normd50_np, shading='auto')
-                ax_inpd50.set_title("d50 (mm) – Geïnterpoleerd", fontsize=11, fontweight='bold')
+                if top_points:
+                    ax_inpd50.plot([p[0] for p in top_points], [p[1] for p in top_points], color='#ef4444', linewidth=2, label='Ligging zeebodem (ALAT)')
+                if bottom_points:
+                    ax_inpd50.plot([p[0] for p in bottom_points], [p[1] for p in bottom_points], color='#3b82f6', linewidth=1.5, linestyle='--', label='Einddiepte (ALAT)')
+
+                ax_inpd50.set_title("d50 (mm) – Geïnterpoleerd", fontsize=11, fontweight='bold', loc='left')
                 ax_inpd50.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
                 ax_inpd50.set_xlabel("Lengte langs profiel (m)", fontsize=9)
                 ax_inpd50.invert_yaxis()
-                fig3.colorbar(imd50, ax=ax_inpd50, label="d50 (mm)")
+                ax_inpd50.grid(True, linestyle='--', alpha=0.3)
+                ax_inpd50.legend(loc='upper right', fontsize=8, framealpha=0.9)
 
-                plt.tight_layout(rect=[0, 0, 1, 0.93])
+                cax_id50 = fig3.add_axes([0.90, 0.08, 0.015, 0.34])
+                cb_id50 = fig3.colorbar(imd50, cax=cax_id50)
+                cb_id50.set_label("d50 (mm)", fontsize=8)
+                cb_id50.ax.tick_params(labelsize=7)
+
                 pdf.savefig(fig3)
                 plt.close(fig3)
             except Exception:
                 pass
 
-        # ── Pages 4+: Diepte-interval Kaarten ─────────────────────────────────
+        # ══════════════════════════════════════════════════════════════════════
+        # PAGES 4+: DEPTH-SLICE SPATIAL MAPS (Landscape A4)
+        # ══════════════════════════════════════════════════════════════════════
         df_maps = df.copy()
         df_maps['MID_LAT'] = np.round((df_maps['Tra_van_lat'] + df_maps['Tra_tot_lat']) / 2.0, 0)
         depths = np.sort(df_maps['MID_LAT'].dropna().unique())
-
-        n_b63 = len(SILT_BINS) - 1
-        cmap63_src = mcolors.LinearSegmentedColormap.from_list("c63", HEX_COLORS)
-        cols63 = [mcolors.to_hex(cmap63_src(i / max(1, n_b63 - 1))) for i in range(n_b63)]
-
-        n_bd50 = len(D50_BINS) - 1
-        cmapd50_src = mcolors.LinearSegmentedColormap.from_list("cd50", HEX_COLORS)
-        cols_d50 = [mcolors.to_hex(cmapd50_src(i / max(1, n_bd50 - 1))) for i in range(n_bd50)]
 
         for depth_val in depths:
             sel = df_maps[df_maps['MID_LAT'] == depth_val].dropna(subset=['X', 'Y'])
@@ -1228,7 +1313,8 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             depth_hi = depth_val + 0.5
 
             fig_d, (ax_d63, ax_dd50) = plt.subplots(1, 2, figsize=(11.69, 8.27))
-            fig_d.suptitle(f"Diepte-interval Kaart: {depth_lo:.2f} – {depth_hi:.2f} m ALAT", fontsize=13, fontweight='bold', y=0.95)
+            fig_d.suptitle(f"Diepte-interval Kaart: {depth_lo:.2f} – {depth_hi:.2f} m ALAT", fontsize=14, fontweight='bold', y=0.96, color='#0f172a')
+            fig_d.subplots_adjust(left=0.07, right=0.93, top=0.88, bottom=0.10, wspace=0.22)
 
             bh_at_depth = set(sel['Boornummer'].unique())
             missing_bh = df_coords[~df_coords['Boornummer'].isin(bh_at_depth)]
@@ -1239,16 +1325,16 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             
             valid_63 = sel[sel['63calculated. met zoutcorrectie'].notna()]
             if not valid_63.empty:
-                c63_arr = [get_bin_color(v, SILT_BINS, cols63) for v in valid_63['63calculated. met zoutcorrectie']]
-                ax_d63.scatter(valid_63['X'], valid_63['Y'], color=c63_arr, s=60, edgecolor='black', linewidth=0.5, label='%<0.063mm')
+                c63_arr = [get_bin_color(v, SILT_BINS, cols63_hex) for v in valid_63['63calculated. met zoutcorrectie']]
+                ax_d63.scatter(valid_63['X'], valid_63['Y'], color=c63_arr, s=65, edgecolor='black', linewidth=0.5, label='%<0.063mm')
                 for _, row in valid_63.iterrows():
-                    ax_d63.annotate(f"{row['63calculated. met zoutcorrectie']:.1f}%", (row['X'], row['Y']), fontsize=6, ha='center', va='bottom', xytext=(0,3), textcoords='offset points')
+                    ax_d63.annotate(f"{row['63calculated. met zoutcorrectie']:.1f}%", (row['X'], row['Y']), fontsize=6.5, fontweight='bold', ha='center', va='bottom', xytext=(0,3), textcoords='offset points')
 
             ax_d63.set_title("%<0.063mm", fontsize=11, fontweight='bold')
-            ax_d63.set_xlabel("X (UTM)", fontsize=8)
-            ax_d63.set_ylabel("Y (UTM)", fontsize=8)
+            ax_d63.set_xlabel("X (UTM)", fontsize=9)
+            ax_d63.set_ylabel("Y (UTM)", fontsize=9)
             ax_d63.grid(True, linestyle='--', alpha=0.3)
-            ax_d63.legend(loc='lower right', fontsize=7)
+            ax_d63.legend(loc='lower right', fontsize=8, framealpha=0.9)
             ax_d63.set_aspect('equal', 'datalim')
 
             # d50 plot
@@ -1257,19 +1343,18 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             
             valid_d50 = sel[sel['d50'].notna()]
             if not valid_d50.empty:
-                cd50_arr = [get_bin_color(v, D50_BINS, cols_d50) for v in valid_d50['d50']]
-                ax_dd50.scatter(valid_d50['X'], valid_d50['Y'], color=cd50_arr, s=60, edgecolor='black', linewidth=0.5, label='d50 (mm)')
+                cd50_arr = [get_bin_color(v, D50_BINS, cols_d50_hex) for v in valid_d50['d50']]
+                ax_dd50.scatter(valid_d50['X'], valid_d50['Y'], color=cd50_arr, s=65, edgecolor='black', linewidth=0.5, label='d50 (mm)')
                 for _, row in valid_d50.iterrows():
-                    ax_dd50.annotate(f"{row['d50']:.2f}", (row['X'], row['Y']), fontsize=6, ha='center', va='bottom', xytext=(0,3), textcoords='offset points')
+                    ax_dd50.annotate(f"{row['d50']:.2f}", (row['X'], row['Y']), fontsize=6.5, fontweight='bold', ha='center', va='bottom', xytext=(0,3), textcoords='offset points')
 
             ax_dd50.set_title("d50 (mm)", fontsize=11, fontweight='bold')
-            ax_dd50.set_xlabel("X (UTM)", fontsize=8)
-            ax_dd50.set_ylabel("Y (UTM)", fontsize=8)
+            ax_dd50.set_xlabel("X (UTM)", fontsize=9)
+            ax_dd50.set_ylabel("Y (UTM)", fontsize=9)
             ax_dd50.grid(True, linestyle='--', alpha=0.3)
-            ax_dd50.legend(loc='lower right', fontsize=7)
+            ax_dd50.legend(loc='lower right', fontsize=8, framealpha=0.9)
             ax_dd50.set_aspect('equal', 'datalim')
 
-            plt.tight_layout(rect=[0, 0, 1, 0.93])
             pdf.savefig(fig_d)
             plt.close(fig_d)
 
