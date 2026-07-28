@@ -1328,11 +1328,16 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 ax_d63.scatter(missing_bh['X'], missing_bh['Y'], color='#d4d4d4', s=25, label='Geen data op dit diepte interval')
             
             valid_63 = sel[sel['63calculated. met zoutcorrectie'].notna()]
+            nan_63 = sel[sel['63calculated. met zoutcorrectie'].isna()]
+
             if not valid_63.empty:
                 c63_arr = [get_bin_color(v, SILT_BINS, cols63_hex) for v in valid_63['63calculated. met zoutcorrectie']]
                 ax_d63.scatter(valid_63['X'], valid_63['Y'], color=c63_arr, s=65, edgecolor='black', linewidth=0.5, label='%<0.063mm')
                 for _, row in valid_63.iterrows():
                     ax_d63.annotate(f"{row['63calculated. met zoutcorrectie']:.1f}%", (row['X'], row['Y']), fontsize=6.5, fontweight='bold', ha='center', va='bottom', xytext=(0,3), textcoords='offset points')
+
+            if not nan_63.empty:
+                ax_d63.scatter(nan_63['X'], nan_63['Y'], color='#737373', marker='x', s=55, linewidth=1.2, label='Ontbrekend / NaN', zorder=4)
 
             # DINO boreholes hollow circle overlay
             if 'DINO' in sel.columns:
@@ -1352,11 +1357,16 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 ax_dd50.scatter(missing_bh['X'], missing_bh['Y'], color='#d4d4d4', s=25, label='Geen data op dit diepte interval')
             
             valid_d50 = sel[sel['d50'].notna()]
+            nan_d50 = sel[sel['d50'].isna()]
+
             if not valid_d50.empty:
                 cd50_arr = [get_bin_color(v, D50_BINS, cols_d50_hex) for v in valid_d50['d50']]
                 ax_dd50.scatter(valid_d50['X'], valid_d50['Y'], color=cd50_arr, s=65, edgecolor='black', linewidth=0.5, label='d50 (mm)')
                 for _, row in valid_d50.iterrows():
                     ax_dd50.annotate(f"{row['d50']:.2f}", (row['X'], row['Y']), fontsize=6.5, fontweight='bold', ha='center', va='bottom', xytext=(0,3), textcoords='offset points')
+
+            if not nan_d50.empty:
+                ax_dd50.scatter(nan_d50['X'], nan_d50['Y'], color='#737373', marker='x', s=55, linewidth=1.2, label='Ontbrekend / NaN', zorder=4)
 
             if 'DINO' in sel.columns:
                 dino_sel = sel[sel['DINO'] == 1]
