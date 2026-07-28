@@ -1170,9 +1170,11 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 silt_heights = silt_df['Tra_tot_lat'] - silt_df['Tra_van_lat']
                 silt_bottoms = silt_df['Tra_van_lat']
                 silt_xs = [cum_dist[bh] for bh in silt_df['Boornummer']]
+                silt_norm_vals = map_values_to_equal_bins(silt_df['63calculated. met zoutcorrectie'], SILT_BINS)
+                silt_layer_widths = (0.3 + 0.9 * np.nan_to_num(silt_norm_vals, nan=0.0)) * plot_width
                 bar_cols = [get_bin_color(v, SILT_BINS, cols63_hex) for v in silt_df['63calculated. met zoutcorrectie']]
                 
-                ax_silt.bar(silt_xs, silt_heights, bottom=silt_bottoms, width=plot_width, color=bar_cols, edgecolor='black', linewidth=0.4, zorder=3)
+                ax_silt.bar(silt_xs, silt_heights, bottom=silt_bottoms, width=silt_layer_widths, color=bar_cols, edgecolor='black', linewidth=0.4, zorder=3)
                 if show_labels:
                     for x_val, bot_val, h_val, v_val in zip(silt_xs, silt_bottoms, silt_heights, silt_df['63calculated. met zoutcorrectie']):
                         ax_silt.text(x_val, bot_val + h_val/2, f"{v_val:.1f}%", ha='center', va='center', fontsize=6.5, color='black', fontweight='bold')
@@ -1200,9 +1202,11 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 d50_heights = d50_df['Tra_tot_lat'] - d50_df['Tra_van_lat']
                 d50_bottoms = d50_df['Tra_van_lat']
                 d50_xs = [cum_dist[bh] for bh in d50_df['Boornummer']]
+                d50_norm_vals = map_values_to_equal_bins(d50_df['d50'], D50_BINS)
+                d50_layer_widths = (0.3 + 0.9 * np.nan_to_num(d50_norm_vals, nan=0.0)) * plot_width
                 bar_cols_d50 = [get_bin_color(v, D50_BINS, cols_d50_hex) for v in d50_df['d50']]
                 
-                ax_d50.bar(d50_xs, d50_heights, bottom=d50_bottoms, width=plot_width, color=bar_cols_d50, edgecolor='black', linewidth=0.4, zorder=3)
+                ax_d50.bar(d50_xs, d50_heights, bottom=d50_bottoms, width=d50_layer_widths, color=bar_cols_d50, edgecolor='black', linewidth=0.4, zorder=3)
                 if show_labels:
                     for x_val, bot_val, h_val, v_val in zip(d50_xs, d50_bottoms, d50_heights, d50_df['d50']):
                         ax_d50.text(x_val, bot_val + h_val/2, f"{v_val:.2f}", ha='center', va='center', fontsize=6.5, color='black', fontweight='bold')
