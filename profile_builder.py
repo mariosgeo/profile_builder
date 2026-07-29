@@ -2842,11 +2842,13 @@ if st.session_state['show_depth_interp_maps']:
 
             # Left Subplot: %<0.063mm Spatial Heatmap
             if x_grid_63 is not None and z_grid_63 is not None:
+                z_norm_63 = map_values_to_equal_bins(z_grid_63, SILT_BINS)
                 fig_d_interp.add_trace(
                     go.Heatmap(
                         x=x_grid_63,
                         y=y_grid_63,
-                        z=z_grid_63,
+                        z=z_norm_63,
+                        zmin=0, zmax=1,
                         colorscale=silt_cs_plotly,
                         showscale=False,
                         hoverinfo='x+y+z',
@@ -2857,11 +2859,13 @@ if st.session_state['show_depth_interp_maps']:
 
             # Right Subplot: d50 Spatial Heatmap
             if x_grid_d50 is not None and z_grid_d50 is not None:
+                z_norm_d50 = map_values_to_equal_bins(z_grid_d50, D50_BINS)
                 fig_d_interp.add_trace(
                     go.Heatmap(
                         x=x_grid_d50,
                         y=y_grid_d50,
-                        z=z_grid_d50,
+                        z=z_norm_d50,
+                        zmin=0, zmax=1,
                         colorscale=d50_cs_plotly,
                         showscale=False,
                         hoverinfo='x+y+z',
