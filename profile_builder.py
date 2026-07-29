@@ -624,8 +624,14 @@ def load_data(uploaded_file, bath_file_bytes=None):
     df['lat'] = lats
     df['X_RD'] = x_rd
     df['Y_RD'] = y_rd
+    df['X_32631'] = df['X']
+    df['Y_32631'] = df['Y']
     df['X_25831'] = x_25831
     df['Y_25831'] = y_25831
+
+    # Standardize X, Y to EPSG:25831 for all spatial plots & calculations
+    df['X'] = x_25831
+    df['Y'] = y_25831
 
     # Sample Bathymetry from map on EPSG:25831
     sampled_vals = None
@@ -1145,8 +1151,8 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 ax_map.annotate(f"{idx+1}. {pbh}", (px, py), fontsize=7.5, fontweight='bold', color='#b91c1c',
                                 textcoords="offset points", xytext=(0, 6), ha='center')
 
-        ax_map.set_xlabel("X (UTM)", fontsize=9)
-        ax_map.set_ylabel("Y (UTM)", fontsize=9)
+        ax_map.set_xlabel("X (EPSG:25831)", fontsize=9)
+        ax_map.set_ylabel("Y (EPSG:25831)", fontsize=9)
         ax_map.grid(True, linestyle='--', alpha=0.3)
         ax_map.legend(loc='upper right', fontsize=8, framealpha=0.9)
         ax_map.set_aspect('equal', 'datalim')
@@ -1346,8 +1352,8 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                     ax_d63.scatter(dino_sel['X'], dino_sel['Y'], s=150, facecolors='none', edgecolors='black', linewidth=1.5, label='Data uit DINO-database', zorder=5)
 
             ax_d63.set_title("%<0.063mm", fontsize=11, fontweight='bold')
-            ax_d63.set_xlabel("X (UTM)", fontsize=9)
-            ax_d63.set_ylabel("Y (UTM)", fontsize=9)
+            ax_d63.set_xlabel("X (EPSG:25831)", fontsize=9)
+            ax_d63.set_ylabel("Y (EPSG:25831)", fontsize=9)
             ax_d63.grid(True, linestyle='--', alpha=0.3)
             ax_d63.legend(loc='lower right', fontsize=8, framealpha=0.9)
             ax_d63.set_aspect('equal', 'datalim')
@@ -1374,8 +1380,8 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                     ax_dd50.scatter(dino_sel['X'], dino_sel['Y'], s=150, facecolors='none', edgecolors='black', linewidth=1.5, label='Data uit DINO-database', zorder=5)
 
             ax_dd50.set_title("d50 (mm)", fontsize=11, fontweight='bold')
-            ax_dd50.set_xlabel("X (UTM)", fontsize=9)
-            ax_dd50.set_ylabel("Y (UTM)", fontsize=9)
+            ax_dd50.set_xlabel("X (EPSG:25831)", fontsize=9)
+            ax_dd50.set_ylabel("Y (EPSG:25831)", fontsize=9)
             ax_dd50.grid(True, linestyle='--', alpha=0.3)
             ax_dd50.legend(loc='lower right', fontsize=8, framealpha=0.9)
             ax_dd50.set_aspect('equal', 'datalim')
@@ -1780,7 +1786,7 @@ if not df_coords.empty:
         hoverinfo='text',
         hovertext=[
             f"<b>Boring: {row['Boornummer']}</b><br>"
-            f"UTM X: {row['X']:.1f}, Y: {row['Y']:.1f}<br>"
+            f"EPSG:25831 X: {row['X']:.1f}, Y: {row['Y']:.1f}<br>"
             f"RD X: {row['X_RD']:.1f}, Y: {row['Y_RD']:.1f}<br>"
             f"Lat: {row['lat']:.5f}, Lon: {row['lon']:.5f}<br>"
             + (f"Bathymetrie: {row['bathymetry']:.2f} m" if pd.notna(row.get('bathymetry')) else "Bathymetrie: N/B")
@@ -2547,8 +2553,9 @@ if show_depth_maps:
                 margin=dict(l=60, r=80, t=80, b=60),
                 paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
                 plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
-                xaxis2=dict(title="X  (UTM)", scaleanchor="y2", scaleratio=1),
-                yaxis=dict(title="Y  (UTM)"),
+                xaxis=dict(title="X (EPSG:25831)", scaleanchor="y", scaleratio=1),
+                xaxis2=dict(title="X (EPSG:25831)", scaleanchor="y2", scaleratio=1),
+                yaxis=dict(title="Y (EPSG:25831)"),
                 yaxis2=dict(title=""),
                 legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
             )
