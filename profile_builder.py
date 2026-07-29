@@ -1576,6 +1576,87 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             pdf.savefig(fig_d)
             plt.close(fig_d)
 
+            # ── 2D Interpolated Depth-Slice Spatial Map Page ──
+            try:
+                x_g63, y_g63, z_g63 = interpolate_spatial_2d(
+                    df_coords, sel, "63calculated. met zoutcorrectie",
+                    dx=interp_dx, interp_method=interp_method,
+                    anis_x=anis_x, anis_y=anis_y
+                )
+                x_gd50, y_gd50, z_gd50 = interpolate_spatial_2d(
+                    df_coords, sel, "d50",
+                    dx=interp_dx, interp_method=interp_method,
+                    anis_x=anis_x, anis_y=anis_y
+                )
+
+                if (z_g63 is not None) or (z_gd50 is not None):
+                    fig_di, (ax_di63, ax_did50) = plt.subplots(1, 2, figsize=(11.69, 8.27))
+                    fig_di.suptitle(f"Geïnterpoleerde Diepte-interval Kaart: {depth_lo:.2f} – {depth_hi:.2f} m ALAT", fontsize=14, fontweight='bold', y=0.96, color='#0f172a')
+                    fig_di.subplots_adjust(left=0.07, right=0.90, top=0.88, bottom=0.10, wspace=0.22)
+
+                    # %<0.063mm Interpolated Map
+                    if z_g63 is not None and x_g63 is not None and y_g63 is not None:
+                        im_di63 = ax_di63.pcolormesh(x_g63, y_g63, z_g63, cmap=cmap63_np, norm=norm63_np, shading='auto', zorder=1)
+                        cax_di63 = fig_di.add_axes([0.45, 0.12, 0.012, 0.72])
+                        cb_di63 = fig_di.colorbar(im_di63, cax=cax_di63)
+                        cb_di63.set_label("%<0.063mm", fontsize=8)
+                        cb_di63.ax.tick_params(labelsize=7)
+
+                    if not valid_63.empty:
+                        c63_arr = [get_bin_color(v, SILT_BINS, cols63_hex) for v in valid_63['63calculated. met zoutcorrectie']]
+                        ax_di63.scatter(valid_63['X'], valid_63['Y'], color=c63_arr, s=65, edgecolor='black', linewidth=0.5, zorder=4)
+                        for _, row in valid_63.iterrows():
+                            ax_di63.annotate(f"{row['63calculated. met zoutcorrectie']:.1f}%", (row['X'], row['Y']), fontsize=6.5, fontweight='bold', ha='center', va='bottom', xytext=(0,3), textcoords='offset points', zorder=5)
+
+                    if 'DINO' in sel.columns and not dino_sel.empty:
+                        ax_di63.scatter(dino_sel['X'], dino_sel['Y'], s=150, facecolors='none', edgecolors='black', linewidth=1.5, zorder=5)
+
+                    if bath_poly_x is not None and bath_poly_y is not None:
+                        ax_di63.plot(bath_poly_x, bath_poly_y, color='#3b82f6', linestyle='--', linewidth=1.2, zorder=3)
+
+                    ax_di63.set_title("%<0.063mm – Geïnterpoleerd", fontsize=11, fontweight='bold')
+                    ax_di63.set_xlabel("X", fontsize=9)
+                    ax_di63.set_ylabel("Y", fontsize=9)
+                    ax_di63.xaxis.set_major_locator(MaxNLocator(nbins=4))
+                    ax_di63.tick_params(axis='x', rotation=25, labelsize=7.5)
+                    ax_di63.ticklabel_format(useOffset=False, style='plain')
+                    ax_di63.grid(True, linestyle='--', alpha=0.3)
+                    ax_di63.set_aspect('equal', 'datalim')
+
+                    # d50 Interpolated Map
+                    if z_gd50 is not None and x_gd50 is not None and y_gd50 is not None:
+                        im_did50 = ax_did50.pcolormesh(x_gd50, y_gd50, z_gd50, cmap=cmapd50_np, norm=normd50_np, shading='auto', zorder=1)
+                        cax_did50 = fig_di.add_axes([0.92, 0.12, 0.012, 0.72])
+                        cb_did50 = fig_di.colorbar(im_did50, cax=cax_did50)
+                        cb_did50.set_label("d50 (mm)", fontsize=8)
+                        cb_did50.ax.tick_params(labelsize=7)
+
+                    if not valid_d50.empty:
+                        cd50_arr = [get_bin_color(v, D50_BINS, cols_d50_hex) for v in valid_d50['d50']]
+                        ax_did50.scatter(valid_d50['X'], valid_d50['Y'], color=cd50_arr, s=65, edgecolor='black', linewidth=0.5, zorder=4)
+                        for _, row in valid_d50.iterrows():
+                            ax_did50.annotate(f"{row['d50']:.2f}", (row['X'], row['Y']), fontsize=6.5, fontweight='bold', ha='center', va='bottom', xytext=(0,3), textcoords='offset points', zorder=5)
+
+                    if 'DINO' in sel.columns and not dino_sel.empty:
+                        ax_did50.scatter(dino_sel['X'], dino_sel['Y'], s=150, facecolors='none', edgecolors='black', linewidth=1.5, zorder=5)
+
+                    if bath_poly_x is not None and bath_poly_y is not None:
+                        ax_did50.plot(bath_poly_x, bath_poly_y, color='#3b82f6', linestyle='--', linewidth=1.2, zorder=3)
+
+                    ax_did50.set_title("d50 (mm) – Geïnterpoleerd", fontsize=11, fontweight='bold')
+                    ax_did50.set_xlabel("X", fontsize=9)
+                    ax_did50.set_ylabel("Y", fontsize=9)
+                    ax_did50.xaxis.set_major_locator(MaxNLocator(nbins=4))
+                    ax_did50.tick_params(axis='x', rotation=25, labelsize=7.5)
+                    ax_did50.ticklabel_format(useOffset=False, style='plain')
+                    ax_did50.grid(True, linestyle='--', alpha=0.3)
+                    ax_did50.set_aspect('equal', 'datalim')
+
+                    pdf.savefig(fig_di)
+                    plt.close(fig_di)
+            except Exception:
+                pass
+
     buf.seek(0)
     return buf.getvalue()
 
