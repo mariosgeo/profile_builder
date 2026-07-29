@@ -1192,9 +1192,24 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             if bottom_points:
                 ax_silt.plot([p[0] for p in bottom_points], [p[1] for p in bottom_points], color='#3b82f6', linewidth=1.5, linestyle='--', label='Einddiepte (ALAT)', zorder=4)
 
+            bh_tick_vals = [cum_dist[bh] for bh in custom_profile]
+            bh_tick_labels = [f"{bh}\n({cum_dist[bh]:.0f}m)" for bh in custom_profile]
+            top_map = dict(top_points) if top_points else {}
+
+            # Annotate borehole names directly above each column on profiles
+            for bh in custom_profile:
+                d_x = cum_dist[bh]
+                t_y = top_map.get(d_x, 10.0)
+                ax_silt.annotate(bh, (d_x, t_y), fontsize=7.5, fontweight='bold', color='#0f172a',
+                                ha='center', va='bottom', xytext=(0, 5), textcoords='offset points', zorder=6)
+                ax_d50.annotate(bh, (d_x, t_y), fontsize=7.5, fontweight='bold', color='#0f172a',
+                               ha='center', va='bottom', xytext=(0, 5), textcoords='offset points', zorder=6)
+
             ax_silt.set_title("Percentage (%) < 0.063mm", fontsize=11, fontweight='bold', loc='left')
             ax_silt.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
             ax_silt.set_xlabel("Lengte langs profiel (m)", fontsize=9)
+            ax_silt.set_xticks(bh_tick_vals)
+            ax_silt.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
             ax_silt.invert_yaxis()
             ax_silt.grid(True, linestyle='--', alpha=0.3)
             ax_silt.legend(loc='upper right', fontsize=8, framealpha=0.9)
@@ -1227,6 +1242,8 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             ax_d50.set_title("d50 (mm)", fontsize=11, fontweight='bold', loc='left')
             ax_d50.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
             ax_d50.set_xlabel("Lengte langs profiel (m)", fontsize=9)
+            ax_d50.set_xticks(bh_tick_vals)
+            ax_d50.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
             ax_d50.invert_yaxis()
             ax_d50.grid(True, linestyle='--', alpha=0.3)
             ax_d50.legend(loc='upper right', fontsize=8, framealpha=0.9)
@@ -1274,9 +1291,20 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 if bottom_points:
                     ax_inp63.plot([p[0] for p in bottom_points], [p[1] for p in bottom_points], color='#3b82f6', linewidth=1.5, linestyle='--', label='Einddiepte (ALAT)')
 
+                # Annotate borehole names on interpolated heatmaps
+                for bh in custom_profile:
+                    d_x = cum_dist[bh]
+                    t_y = top_map.get(d_x, 10.0)
+                    ax_inp63.annotate(bh, (d_x, t_y), fontsize=7.5, fontweight='bold', color='#0f172a',
+                                      ha='center', va='bottom', xytext=(0, 5), textcoords='offset points', zorder=6)
+                    ax_inpd50.annotate(bh, (d_x, t_y), fontsize=7.5, fontweight='bold', color='#0f172a',
+                                       ha='center', va='bottom', xytext=(0, 5), textcoords='offset points', zorder=6)
+
                 ax_inp63.set_title("%<0.063mm – Geïnterpoleerd", fontsize=11, fontweight='bold', loc='left')
                 ax_inp63.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
                 ax_inp63.set_xlabel("Lengte langs profiel (m)", fontsize=9)
+                ax_inp63.set_xticks(bh_tick_vals)
+                ax_inp63.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
                 ax_inp63.invert_yaxis()
                 ax_inp63.grid(True, linestyle='--', alpha=0.3)
                 ax_inp63.legend(loc='upper right', fontsize=8, framealpha=0.9)
@@ -1295,6 +1323,8 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 ax_inpd50.set_title("d50 (mm) – Geïnterpoleerd", fontsize=11, fontweight='bold', loc='left')
                 ax_inpd50.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
                 ax_inpd50.set_xlabel("Lengte langs profiel (m)", fontsize=9)
+                ax_inpd50.set_xticks(bh_tick_vals)
+                ax_inpd50.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
                 ax_inpd50.invert_yaxis()
                 ax_inpd50.grid(True, linestyle='--', alpha=0.3)
                 ax_inpd50.legend(loc='upper right', fontsize=8, framealpha=0.9)
@@ -2102,6 +2132,26 @@ else:
                 row=1, col=col_idx
             )
         
+    # Annotate borehole names directly above top_points line for each selected borehole
+    top_map = dict(top_points) if top_points else {}
+    for bh in st.session_state.custom_profile:
+        d_x = cum_dist[bh]
+        t_y = top_map.get(d_x, 10.0)
+        for col_idx in [1, 2]:
+            fig_sub.add_trace(
+                go.Scatter(
+                    x=[d_x],
+                    y=[t_y],
+                    mode='text',
+                    text=[f"<b>{bh}</b>"],
+                    textposition="top center",
+                    textfont=dict(size=10, color='#0f172a' if not is_dark_plot else '#f8fafc'),
+                    hoverinfo='skip',
+                    showlegend=False
+                ),
+                row=1, col=col_idx
+            )
+
     # Set tick marks matching the selection path
     tick_vals = [cum_dist[bh] for bh in st.session_state.custom_profile]
     tick_text = [f"<b>{bh}</b><br>{cum_dist[bh]:.0f}m" for bh in st.session_state.custom_profile]
