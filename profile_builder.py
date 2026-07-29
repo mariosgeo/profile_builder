@@ -1039,8 +1039,8 @@ def interpolate_spatial_2d(df, df_coords, depth_lo, depth_hi, value_col, dx=25.0
     x_min, x_max = df_coords['X'].min() - 50.0, df_coords['X'].max() + 50.0
     y_min, y_max = df_coords['Y'].min() - 50.0, df_coords['Y'].max() + 50.0
 
-    dx_use = max(5.0, float(dx))
-    dy_use = max(5.0, float(dy))
+    dx_use = max(1.0, float(dx))
+    dy_use = max(1.0, float(dy if dy >= 1.0 else dx))
 
     x_arr = np.arange(x_min, x_max + dx_use, dx_use)
     y_arr = np.arange(y_min, y_max + dy_use, dy_use)
