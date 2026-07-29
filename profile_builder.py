@@ -1819,7 +1819,7 @@ interp_dx = st.sidebar.number_input(
 )
 interp_dy = st.sidebar.number_input(
     "Dieptestap dy (m)",
-    min_value=0.05, max_value=5.0, value=0.25, step=0.05,
+    min_value=0.05, max_value=500.0, value=0.25, step=0.05,
     help="Gridresolutie in de diepterichting, in meters."
 )
 
