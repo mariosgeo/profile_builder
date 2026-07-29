@@ -1019,46 +1019,96 @@ def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, pr
 
     return x_arr, y_arr, result
 
-def interpolate_spatial_2d(df_coords, sel_df, value_col, dx=25.0, dy=25.0, interp_method="Linear (TIN / Delaunay)", anis_x=1.0, anis_y=1.0):
+def interpolate_spatial_2d(df, df_coords, depth_lo, depth_hi, value_col, dx=25.0, dy=25.0, interp_method="Linear (TIN / Delaunay)", anis_x=1.0, anis_y=1.0):
     """
     Interpolates 2D spatial property data across the coordinate bounding box of all boreholes.
+    Includes ALL available non-NaN data from ALL boreholes at depth_lo <= depth <= depth_hi.
+    Supports all sidebar interpolation methods: Linear, Nearest, IDW, Cubic, RBF, Gaussian Process, Biharmonic.
     Returns (x_arr, y_arr, z_grid_2d).
     """
-    valid_data = sel_df[sel_df[value_col].notna()].copy()
+    # Filter dataset for layer overlap with depth range [depth_lo, depth_hi]
+    df_sub = df[(df['Tra_van_lat'] <= depth_hi) & (df['Tra_tot_lat'] >= depth_lo) & df[value_col].notna()].copy()
+    if df_sub.empty:
+        return None, None, None
+
+    # Group by borehole location to get average non-NaN value per borehole at this depth slice
+    valid_data = df_sub.groupby(['Boornummer', 'X', 'Y'])[value_col].mean().reset_index()
     if len(valid_data) < 2:
         return None, None, None
-    
+
     x_min, x_max = df_coords['X'].min() - 50.0, df_coords['X'].max() + 50.0
     y_min, y_max = df_coords['Y'].min() - 50.0, df_coords['Y'].max() + 50.0
-    
+
     dx_use = max(5.0, float(dx))
     dy_use = max(5.0, float(dy))
-    
+
     x_arr = np.arange(x_min, x_max + dx_use, dx_use)
     y_arr = np.arange(y_min, y_max + dy_use, dy_use)
     grid_X, grid_Y = np.meshgrid(x_arr, y_arr)
-    
+
     train_pts = valid_data[['X', 'Y']].values
     known_vals = valid_data[value_col].values
-    
-    train_scaled = train_pts * np.array([1.0 / max(0.01, anis_x), 1.0 / max(0.01, anis_y)])
-    query_scaled = np.column_stack([grid_X.ravel(), grid_Y.ravel()]) * np.array([1.0 / max(0.01, anis_x), 1.0 / max(0.01, anis_y)])
-    
-    sci_method = 'nearest'
-    if "Linear" in interp_method:
-        sci_method = 'linear'
-    elif "Cubic" in interp_method:
-        sci_method = 'cubic'
-    elif "Nearest" in interp_method:
-        sci_method = 'nearest'
-        
+
+    ax_s = max(0.01, float(anis_x))
+    ay_s = max(0.01, float(anis_y))
+    train_scaled = train_pts * np.array([1.0 / ax_s, 1.0 / ay_s])
+    query_scaled = np.column_stack([grid_X.ravel(), grid_Y.ravel()]) * np.array([1.0 / ax_s, 1.0 / ay_s])
+
+    nx = len(x_arr)
+    ny = len(y_arr)
+
     try:
-        from scipy.interpolate import griddata as scipy_griddata
-        z_flat = scipy_griddata(train_scaled, known_vals, query_scaled, method=sci_method)
-        if np.isnan(z_flat).any():
-            z_flat_near = scipy_griddata(train_scaled, known_vals, query_scaled, method='nearest')
-            z_flat = np.where(np.isnan(z_flat), z_flat_near, z_flat)
-        grid_Z = z_flat.reshape(grid_X.shape)
+        if interp_method.startswith("IDW"):
+            diff_x = query_scaled[:, 0:1] - train_scaled[:, 0].T
+            diff_y = query_scaled[:, 1:2] - train_scaled[:, 1].T
+            dists = np.sqrt(diff_x**2 + diff_y**2)
+            dists = np.maximum(dists, 1e-6)
+            weights = 1.0 / (dists ** 2)
+            z_flat = np.sum(weights * known_vals, axis=1) / np.sum(weights, axis=1)
+            grid_Z = z_flat.reshape((ny, nx))
+
+        elif interp_method.startswith("sklearn – RBF"):
+            from scipy.interpolate import RBFInterpolator
+            rbf = RBFInterpolator(train_scaled, known_vals, kernel='thin_plate_spline')
+            z_flat = rbf(query_scaled)
+            grid_Z = z_flat.reshape((ny, nx))
+
+        elif interp_method.startswith("sklearn – Gaussian Process"):
+            from sklearn.gaussian_process import GaussianProcessRegressor
+            from sklearn.gaussian_process.kernels import RBF, WhiteKernel
+            gpr = GaussianProcessRegressor(kernel=RBF(1.0) + WhiteKernel(1e-4), normalize_y=True)
+            gpr.fit(train_scaled, known_vals)
+            z_flat = gpr.predict(query_scaled)
+            grid_Z = z_flat.reshape((ny, nx))
+
+        elif interp_method.startswith("skimage – biharmonic"):
+            from scipy.interpolate import RBFInterpolator
+            rbf = RBFInterpolator(train_scaled, known_vals, kernel='thin_plate_spline')
+            z_flat = rbf(query_scaled)
+            grid_Z = z_flat.reshape((ny, nx))
+
+        elif interp_method.startswith("Cubic"):
+            from scipy.interpolate import griddata as scipy_griddata
+            z_flat = scipy_griddata(train_scaled, known_vals, query_scaled, method='cubic')
+            if np.isnan(z_flat).any():
+                z_near = scipy_griddata(train_scaled, known_vals, query_scaled, method='nearest')
+                z_flat = np.where(np.isnan(z_flat), z_near, z_flat)
+            grid_Z = z_flat.reshape((ny, nx))
+
+        elif interp_method.startswith("Nearest"):
+            from scipy.interpolate import griddata as scipy_griddata
+            z_flat = scipy_griddata(train_scaled, known_vals, query_scaled, method='nearest')
+            grid_Z = z_flat.reshape((ny, nx))
+
+        else:
+            # Default: Linear (TIN / Delaunay)
+            from scipy.interpolate import griddata as scipy_griddata
+            z_flat = scipy_griddata(train_scaled, known_vals, query_scaled, method='linear')
+            if np.isnan(z_flat).any():
+                z_near = scipy_griddata(train_scaled, known_vals, query_scaled, method='nearest')
+                z_flat = np.where(np.isnan(z_flat), z_near, z_flat)
+            grid_Z = z_flat.reshape((ny, nx))
+
         return x_arr, y_arr, grid_Z
     except Exception:
         return None, None, None
@@ -2779,12 +2829,12 @@ if st.session_state['show_depth_interp_maps']:
 
             # Perform 2D Spatial Interpolation for %<0.063mm and d50
             x_grid_63, y_grid_63, z_grid_63 = interpolate_spatial_2d(
-                df_coords, sel, "63calculated. met zoutcorrectie",
+                df, df_coords, depth_lo, depth_hi, "63calculated. met zoutcorrectie",
                 dx=interp_dx, dy=interp_dy, interp_method=interp_method,
                 anis_x=anis_x, anis_y=anis_y
             )
             x_grid_d50, y_grid_d50, z_grid_d50 = interpolate_spatial_2d(
-                df_coords, sel, "d50",
+                df, df_coords, depth_lo, depth_hi, "d50",
                 dx=interp_dx, dy=interp_dy, interp_method=interp_method,
                 anis_x=anis_x, anis_y=anis_y
             )
