@@ -1037,6 +1037,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
     import matplotlib.colors as mcolors
+    from matplotlib.ticker import MaxNLocator
 
     buf = io.BytesIO()
 
@@ -1192,6 +1193,9 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
 
         ax_map.set_xlabel("X (EPSG:25831)", fontsize=9)
         ax_map.set_ylabel("Y (EPSG:25831)", fontsize=9)
+        ax_map.xaxis.set_major_locator(MaxNLocator(nbins=4))
+        ax_map.tick_params(axis='x', rotation=25, labelsize=7.5)
+        ax_map.ticklabel_format(useOffset=False, style='plain')
         ax_map.grid(True, linestyle='--', alpha=0.3)
         ax_map.legend(loc='upper right', fontsize=8, framealpha=0.9)
         ax_map.set_aspect('equal', 'datalim')
@@ -1441,6 +1445,9 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             ax_d63.set_title("%<0.063mm", fontsize=11, fontweight='bold')
             ax_d63.set_xlabel("X", fontsize=9)
             ax_d63.set_ylabel("Y", fontsize=9)
+            ax_d63.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            ax_d63.tick_params(axis='x', rotation=25, labelsize=7.5)
+            ax_d63.ticklabel_format(useOffset=False, style='plain')
             ax_d63.grid(True, linestyle='--', alpha=0.3)
             ax_d63.legend(loc='lower right', fontsize=8, framealpha=0.9)
             ax_d63.set_aspect('equal', 'datalim')
@@ -1469,6 +1476,9 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             ax_dd50.set_title("d50 (mm)", fontsize=11, fontweight='bold')
             ax_dd50.set_xlabel("X", fontsize=9)
             ax_dd50.set_ylabel("Y", fontsize=9)
+            ax_dd50.xaxis.set_major_locator(MaxNLocator(nbins=4))
+            ax_dd50.tick_params(axis='x', rotation=25, labelsize=7.5)
+            ax_dd50.ticklabel_format(useOffset=False, style='plain')
             ax_dd50.grid(True, linestyle='--', alpha=0.3)
             ax_dd50.legend(loc='lower right', fontsize=8, framealpha=0.9)
             ax_dd50.set_aspect('equal', 'datalim')
