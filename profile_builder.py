@@ -1019,6 +1019,50 @@ def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, pr
 
     return x_arr, y_arr, result
 
+def interpolate_spatial_2d(df_coords, sel_df, value_col, dx=25.0, dy=25.0, interp_method="Linear (TIN / Delaunay)", anis_x=1.0, anis_y=1.0):
+    """
+    Interpolates 2D spatial property data across the coordinate bounding box of all boreholes.
+    Returns (x_arr, y_arr, z_grid_2d).
+    """
+    valid_data = sel_df[sel_df[value_col].notna()].copy()
+    if len(valid_data) < 2:
+        return None, None, None
+    
+    x_min, x_max = df_coords['X'].min() - 50.0, df_coords['X'].max() + 50.0
+    y_min, y_max = df_coords['Y'].min() - 50.0, df_coords['Y'].max() + 50.0
+    
+    dx_use = max(5.0, float(dx))
+    dy_use = max(5.0, float(dy))
+    
+    x_arr = np.arange(x_min, x_max + dx_use, dx_use)
+    y_arr = np.arange(y_min, y_max + dy_use, dy_use)
+    grid_X, grid_Y = np.meshgrid(x_arr, y_arr)
+    
+    train_pts = valid_data[['X', 'Y']].values
+    known_vals = valid_data[value_col].values
+    
+    train_scaled = train_pts * np.array([1.0 / max(0.01, anis_x), 1.0 / max(0.01, anis_y)])
+    query_scaled = np.column_stack([grid_X.ravel(), grid_Y.ravel()]) * np.array([1.0 / max(0.01, anis_x), 1.0 / max(0.01, anis_y)])
+    
+    sci_method = 'nearest'
+    if "Linear" in interp_method:
+        sci_method = 'linear'
+    elif "Cubic" in interp_method:
+        sci_method = 'cubic'
+    elif "Nearest" in interp_method:
+        sci_method = 'nearest'
+        
+    try:
+        from scipy.interpolate import griddata as scipy_griddata
+        z_flat = scipy_griddata(train_scaled, known_vals, query_scaled, method=sci_method)
+        if np.isnan(z_flat).any():
+            z_flat_near = scipy_griddata(train_scaled, known_vals, query_scaled, method='nearest')
+            z_flat = np.where(np.isnan(z_flat), z_flat_near, z_flat)
+        grid_Z = z_flat.reshape(grid_X.shape)
+        return x_arr, y_arr, grid_Z
+    except Exception:
+        return None, None, None
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PDF Report Exporter Generator Function
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2699,5 +2743,207 @@ if show_depth_maps:
             )
 
             st.plotly_chart(fig_depth, use_container_width=True, key=f"depth_slice_{depth_val}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Section 8: Geïnterpoleerde Diepte-interval Kaarten (2D Spatial Interpolation)
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("<hr style='margin-top:2.5rem; margin-bottom:1.5rem;'>", unsafe_allow_html=True)
+st.markdown("### 🌐 Geïnterpoleerde Diepte-interval Kaarten")
+st.markdown("Klik op de onderstaande knop om voor **elk diepte-interval** een 2D ruimtelijke interpolatiekaart te genereren. Hierbij worden exact dezelfde interpolatie-instellingen gebruikt als ingesteld in het zijpaneel.")
+
+col_btn1, col_btn2 = st.columns([1.5, 2.5])
+with col_btn1:
+    gen_depth_interp_btn = st.button(
+        "🌐 Genereer Geïnterpoleerde Diepte-interval Kaarten",
+        key="btn_generate_depth_interpolations",
+        use_container_width=True
+    )
+
+if 'show_depth_interp_maps' not in st.session_state:
+    st.session_state['show_depth_interp_maps'] = False
+
+if gen_depth_interp_btn:
+    st.session_state['show_depth_interp_maps'] = True
+
+if st.session_state['show_depth_interp_maps']:
+    st.info(f"📊 **Toegepaste Interpolatie parameters**: Methode: `{interp_method}` | Grid: `dx={interp_dx}m, dy={interp_dy}m` | Gewichten: `X={anis_x}, Y={anis_y}`")
+    
+    with st.spinner("2D Diepte-interval interpolatiekaarten genereren..."):
+        for depth_val in depths:
+            sel = df_maps[df_maps['MID_LAT'] == depth_val].dropna(subset=['X', 'Y'])
+            if len(sel) == 0:
+                continue
+
+            depth_lo = depth_val - 0.5
+            depth_hi = depth_val + 0.5
+
+            # Perform 2D Spatial Interpolation for %<0.063mm and d50
+            x_grid_63, y_grid_63, z_grid_63 = interpolate_spatial_2d(
+                df_coords, sel, "63calculated. met zoutcorrectie",
+                dx=interp_dx, dy=interp_dy, interp_method=interp_method,
+                anis_x=anis_x, anis_y=anis_y
+            )
+            x_grid_d50, y_grid_d50, z_grid_d50 = interpolate_spatial_2d(
+                df_coords, sel, "d50",
+                dx=interp_dx, dy=interp_dy, interp_method=interp_method,
+                anis_x=anis_x, anis_y=anis_y
+            )
+
+            fig_d_interp = make_subplots(
+                rows=1, cols=2,
+                subplot_titles=(
+                    "<b>%<0.063mm – Geïnterpoleerd</b>",
+                    "<b>d50 (mm) – Geïnterpoleerd</b>"
+                ),
+                horizontal_spacing=0.08
+            )
+
+            # Left Subplot: %<0.063mm Spatial Heatmap
+            if x_grid_63 is not None and z_grid_63 is not None:
+                fig_d_interp.add_trace(
+                    go.Heatmap(
+                        x=x_grid_63,
+                        y=y_grid_63,
+                        z=z_grid_63,
+                        colorscale=silt_cs_plotly,
+                        showscale=False,
+                        hoverinfo='x+y+z',
+                        name='%<0.063mm'
+                    ),
+                    row=1, col=1
+                )
+
+            # Right Subplot: d50 Spatial Heatmap
+            if x_grid_d50 is not None and z_grid_d50 is not None:
+                fig_d_interp.add_trace(
+                    go.Heatmap(
+                        x=x_grid_d50,
+                        y=y_grid_d50,
+                        z=z_grid_d50,
+                        colorscale=d50_cs_plotly,
+                        showscale=False,
+                        hoverinfo='x+y+z',
+                        name='d50'
+                    ),
+                    row=1, col=2
+                )
+
+            # Overlay Bathymetry Polygon Outline on both subplots
+            if bath_poly_x is not None and bath_poly_y is not None:
+                for col_idx in [1, 2]:
+                    fig_d_interp.add_trace(
+                        go.Scatter(
+                            x=bath_poly_x,
+                            y=bath_poly_y,
+                            mode='lines',
+                            line=dict(color='#3b82f6', width=1.8, dash='dash'),
+                            name='Omtrek Bathymetriekaart',
+                            showlegend=(col_idx == 1),
+                            hoverinfo='skip'
+                        ),
+                        row=1, col=col_idx
+                    )
+
+            # Overlay Borehole Markers & Labels on %<0.063mm subplot
+            valid_63 = sel[sel['63calculated. met zoutcorrectie'].notna()]
+            if not valid_63.empty:
+                silt_colors_arr = [get_bin_color(v, SILT_BINS, silt_map_colors) for v in valid_63['63calculated. met zoutcorrectie']]
+                fig_d_interp.add_trace(
+                    go.Scatter(
+                        x=valid_63['X'],
+                        y=valid_63['Y'],
+                        mode='markers+text',
+                        marker=dict(size=12, color=silt_colors_arr, line=dict(color='black', width=0.5)),
+                        text=[f"{v:.1f}%" for v in valid_63['63calculated. met zoutcorrectie']],
+                        textposition='top center',
+                        textfont=dict(size=9),
+                        hovertext=[f"Boring: {row['Boornummer']}<br>%<0.063mm: {row['63calculated. met zoutcorrectie']:.2f}%" for _, row in valid_63.iterrows()],
+                        hoverinfo='text',
+                        showlegend=False,
+                    ),
+                    row=1, col=1
+                )
+
+            # Overlay Borehole Markers & Labels on d50 subplot
+            valid_d50 = sel[sel['d50'].notna()]
+            if not valid_d50.empty:
+                d50_colors_arr = [get_bin_color(v, D50_BINS, d50_map_colors) for v in valid_d50['d50']]
+                fig_d_interp.add_trace(
+                    go.Scatter(
+                        x=valid_d50['X'],
+                        y=valid_d50['Y'],
+                        mode='markers+text',
+                        marker=dict(size=12, color=d50_colors_arr, line=dict(color='black', width=0.5)),
+                        text=[f"{v:.3f}" for v in valid_d50['d50']],
+                        textposition='top center',
+                        textfont=dict(size=9),
+                        hovertext=[f"Boring: {row['Boornummer']}<br>d50: {row['d50']:.3f} mm" for _, row in valid_d50.iterrows()],
+                        hoverinfo='text',
+                        showlegend=False,
+                    ),
+                    row=1, col=2
+                )
+
+            # Add DINO boreholes outline if present
+            if 'DINO' in sel.columns:
+                dino_sel = sel[sel['DINO'] == 1]
+                if not dino_sel.empty:
+                    for col_idx in [1, 2]:
+                        fig_d_interp.add_trace(
+                            go.Scatter(
+                                x=dino_sel['X'],
+                                y=dino_sel['Y'],
+                                mode='markers',
+                                marker=dict(size=18, color='rgba(0,0,0,0)', line=dict(color='black', width=2)),
+                                name='Data uit DINO-database' if col_idx == 1 else '',
+                                showlegend=(col_idx == 1),
+                            ),
+                            row=1, col=col_idx
+                        )
+
+            # Colorbars setup
+            fig_d_interp.add_trace(
+                go.Scatter(
+                    x=[None], y=[None], mode='markers',
+                    marker=dict(
+                        size=0.001, color=[0.5], colorscale=silt_cs_plotly, cmin=0, cmax=1,
+                        colorbar=dict(title="%<0.063mm", x=0.44, len=0.85, y=0.5, thickness=12, tickmode='array', tickvals=silt_tick_vals_map, ticktext=silt_tick_text_map),
+                        showscale=True,
+                    ),
+                    showlegend=False, hoverinfo='skip',
+                ),
+                row=1, col=1
+            )
+            fig_d_interp.add_trace(
+                go.Scatter(
+                    x=[None], y=[None], mode='markers',
+                    marker=dict(
+                        size=0.001, color=[0.5], colorscale=d50_cs_plotly, cmin=0, cmax=1,
+                        colorbar=dict(title="d50 (mm)", x=1.02, len=0.85, y=0.5, thickness=12, tickmode='array', tickvals=d50_tick_vals_map, ticktext=d50_tick_text_map),
+                        showscale=True,
+                    ),
+                    showlegend=False, hoverinfo='skip',
+                ),
+                row=1, col=2
+            )
+
+            fig_d_interp.update_layout(
+                title=dict(
+                    text=f"<b>Geïnterpoleerde Diepte-interval Kaart: {depth_lo:.2f} – {depth_hi:.2f} m ALAT</b>",
+                    x=0.5, xanchor="center", font=dict(size=15)
+                ),
+                template="plotly_dark" if is_dark_plot else "plotly_white",
+                height=520,
+                margin=dict(l=60, r=80, t=80, b=60),
+                paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
+                plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
+                xaxis=dict(title="X", scaleanchor="y", scaleratio=1),
+                xaxis2=dict(title="X", scaleanchor="y2", scaleratio=1),
+                yaxis=dict(title="Y"),
+                yaxis2=dict(title=""),
+                legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
+            )
+
+            st.plotly_chart(fig_d_interp, use_container_width=True, key=f"depth_slice_interp_{depth_val}")
 
 st.markdown('</div>', unsafe_allow_html=True)
