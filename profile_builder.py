@@ -107,14 +107,40 @@ def create_equal_discrete_colorscale(n_bins, hex_colors):
         colorscale.append([(i + 1) / n_bins, bin_colors[i]])
     return colorscale
 
-def get_bin_color(val, bins, colors):
-    """Return color for a value based on discrete bins."""
-    if pd.isna(val):
-        return '#999999'
-    for i in range(len(bins) - 1):
-        if val < bins[i + 1]:
-            return colors[min(i, len(colors) - 1)]
-    return colors[-1]
+def get_bathymetry_polygon(bath_file_bytes=None):
+    """Returns (poly_x, poly_y) in EPSG:25831 representing the bathymetry raster boundary polygon."""
+    try:
+        import rasterio
+        from rasterio.io import MemoryFile
+        from pyproj import Transformer
+        import os
+
+        src = None
+        if bath_file_bytes is not None:
+            memfile = MemoryFile(bath_file_bytes)
+            src = memfile.open()
+        elif os.path.exists("25NZE4376ml9_1.img"):
+            src = rasterio.open("25NZE4376ml9_1.img")
+
+        if src is not None:
+            left, bottom, right, top = src.bounds
+            crs = src.crs
+            src.close()
+
+            bx = [left, right, right, left, left]
+            by = [bottom, bottom, top, top, bottom]
+
+            if crs is not None and str(crs).upper() != "EPSG:25831":
+                try:
+                    to_25831 = Transformer.from_crs(crs, "EPSG:25831", always_xy=True)
+                    poly_x, poly_y = to_25831.transform(bx, by)
+                    return list(poly_x), list(poly_y)
+                except Exception:
+                    pass
+            return bx, by
+    except Exception:
+        pass
+    return None, None
 
 def get_profile_bathymetry(profile_bh_list, df_coords, bath_file_bytes=None, bath_filename=None, step_m=1.0):
     """
@@ -1054,6 +1080,8 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 top_y = dict(top_points).get(d_x, 10.0)
                 bottom_points.append((d_x, top_y + 5.0))
 
+    bath_poly_x, bath_poly_y = get_bathymetry_polygon(bath_file_bytes)
+
     # Discrete Colormaps setup for Matplotlib
     n_b63 = len(SILT_BINS) - 1
     cmap63_src = mcolors.LinearSegmentedColormap.from_list("c63", HEX_COLORS)
@@ -1395,6 +1423,11 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 dino_sel = sel[sel['DINO'] == 1]
                 if not dino_sel.empty:
                     ax_d63.scatter(dino_sel['X'], dino_sel['Y'], s=150, facecolors='none', edgecolors='black', linewidth=1.5, label='Data uit DINO-database', zorder=5)
+
+            # Bathymetry raster outline polygon
+            if bath_poly_x is not None and bath_poly_y is not None:
+                ax_d63.plot(bath_poly_x, bath_poly_y, color='#3b82f6', linestyle='--', linewidth=1.2, label='Bathymetriekaart Omtrek', zorder=2)
+                ax_dd50.plot(bath_poly_x, bath_poly_y, color='#3b82f6', linestyle='--', linewidth=1.2, label='Bathymetriekaart Omtrek', zorder=2)
 
             ax_d63.set_title("%<0.063mm", fontsize=11, fontweight='bold')
             ax_d63.set_xlabel("X", fontsize=9)
@@ -2402,6 +2435,9 @@ if show_depth_maps:
                     return colors[min(i, len(colors) - 1)]
             return colors[-1]
 
+        bath_bytes_input = uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None
+        bath_poly_x, bath_poly_y = get_bathymetry_polygon(bath_bytes_input)
+
         for depth_val in depths:
             sel = df_maps[df_maps['MID_LAT'] == depth_val].dropna(subset=['X', 'Y'])
             if len(sel) == 0:
@@ -2420,6 +2456,24 @@ if show_depth_maps:
                 ),
                 horizontal_spacing=0.08
             )
+
+            # ── Bathymetry raster outline polygon ────────────────────────────
+            if bath_poly_x is not None and bath_poly_y is not None:
+                for col_idx in [1, 2]:
+                    fig_depth.add_trace(
+                        go.Scatter(
+                            x=bath_poly_x,
+                            y=bath_poly_y,
+                            mode='lines',
+                            line=dict(color='#3b82f6', width=1.8, dash='dash'),
+                            fill='toself',
+                            fillcolor='rgba(59, 130, 246, 0.04)',
+                            name='Omtrek Bathymetriekaart',
+                            showlegend=(col_idx == 1),
+                            hoverinfo='skip'
+                        ),
+                        row=1, col=col_idx
+                    )
 
             # ── All boreholes not at this depth → grey reference dots ─────────
             bh_at_depth = set(sel['Boornummer'].unique())
