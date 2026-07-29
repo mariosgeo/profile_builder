@@ -1019,20 +1019,13 @@ def interpolate_profile(prof_df, cum_dist, top_points, bottom_points, dx, dy, pr
 
     return x_arr, y_arr, result
 
-def interpolate_spatial_2d(df, df_coords, depth_lo, depth_hi, value_col, dx=25.0, dy=25.0, interp_method="Linear (TIN / Delaunay)", anis_x=1.0, anis_y=1.0):
+def interpolate_spatial_2d(df_coords, sel_df, value_col, dx=25.0, interp_method="Linear (TIN / Delaunay)", anis_x=1.0, anis_y=1.0):
     """
     Interpolates 2D spatial property data across the coordinate bounding box of all boreholes.
-    Includes ALL available non-NaN data from ALL boreholes at depth_lo <= depth <= depth_hi.
-    Supports all sidebar interpolation methods: Linear, Nearest, IDW, Cubic, RBF, Gaussian Process, Biharmonic.
+    Uses the exact valid non-NaN data from sel_df at this depth slice.
     Returns (x_arr, y_arr, z_grid_2d).
     """
-    # Filter dataset for layer overlap with depth range [depth_lo, depth_hi]
-    df_sub = df[(df['Tra_van_lat'] <= depth_hi) & (df['Tra_tot_lat'] >= depth_lo) & df[value_col].notna()].copy()
-    if df_sub.empty:
-        return None, None, None
-
-    # Group by borehole location to get average non-NaN value per borehole at this depth slice
-    valid_data = df_sub.groupby(['Boornummer', 'X', 'Y'])[value_col].mean().reset_index()
+    valid_data = sel_df[sel_df[value_col].notna()].copy()
     if len(valid_data) < 2:
         return None, None, None
 
@@ -2825,13 +2818,13 @@ if st.session_state['show_depth_interp_maps']:
 
             # Perform 2D Spatial Interpolation for %<0.063mm and d50
             x_grid_63, y_grid_63, z_grid_63 = interpolate_spatial_2d(
-                df, df_coords, depth_lo, depth_hi, "63calculated. met zoutcorrectie",
-                dx=interp_dx, dy=interp_dy, interp_method=interp_method,
+                df_coords, sel, "63calculated. met zoutcorrectie",
+                dx=interp_dx, interp_method=interp_method,
                 anis_x=anis_x, anis_y=anis_y
             )
             x_grid_d50, y_grid_d50, z_grid_d50 = interpolate_spatial_2d(
-                df, df_coords, depth_lo, depth_hi, "d50",
-                dx=interp_dx, dy=interp_dy, interp_method=interp_method,
+                df_coords, sel, "d50",
+                dx=interp_dx, interp_method=interp_method,
                 anis_x=anis_x, anis_y=anis_y
             )
 
