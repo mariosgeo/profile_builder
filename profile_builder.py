@@ -107,6 +107,15 @@ def create_equal_discrete_colorscale(n_bins, hex_colors):
         colorscale.append([(i + 1) / n_bins, bin_colors[i]])
     return colorscale
 
+def get_bin_color(val, bins, colors):
+    """Return color for a value based on discrete bins."""
+    if pd.isna(val):
+        return '#999999'
+    for i in range(len(bins) - 1):
+        if val < bins[i + 1]:
+            return colors[min(i, len(colors) - 1)]
+    return colors[-1]
+
 def get_bathymetry_polygon(bath_file_bytes=None):
     """Returns (poly_x, poly_y) in EPSG:25831 representing the bathymetry raster boundary polygon."""
     try:
@@ -1080,7 +1089,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 top_y = dict(top_points).get(d_x, 10.0)
                 bottom_points.append((d_x, top_y + 5.0))
 
-    bath_poly_x, bath_poly_y = get_bathymetry_polygon(bath_file_bytes)
+    bath_poly_x, bath_poly_y = get_bathymetry_polygon(bath_bytes)
 
     # Discrete Colormaps setup for Matplotlib
     n_b63 = len(SILT_BINS) - 1
