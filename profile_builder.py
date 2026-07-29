@@ -1131,11 +1131,13 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
         ax_map = fig1.add_axes([0.53, 0.08, 0.42, 0.78])
         ax_map.set_title("Kaart Boringselectie & Profielpad", fontsize=12, fontweight='bold', pad=10, color='#0f172a')
 
+        profile_set = set(custom_profile)
         if not df_coords.empty:
             ax_map.scatter(df_coords['X'], df_coords['Y'], color='#22c55e', s=35, zorder=3, label='Alle boringen')
             for _, row in df_coords.iterrows():
-                ax_map.annotate(row['Boornummer'], (row['X'], row['Y']), fontsize=6.5, color='#334155',
-                                textcoords="offset points", xytext=(0, 4), ha='center')
+                if row['Boornummer'] not in profile_set:
+                    ax_map.annotate(row['Boornummer'], (row['X'], row['Y']), fontsize=6.5, color='#334155',
+                                    textcoords="offset points", xytext=(0, 4), ha='center')
 
         if len(custom_profile) >= 2:
             prof_xs = []
