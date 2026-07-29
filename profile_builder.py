@@ -1239,7 +1239,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             ax_silt.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
             ax_silt.set_ylim(y_max_foot, y_min_head)
             ax_silt.grid(True, linestyle='--', alpha=0.3)
-            ax_silt.legend(loc='upper right', fontsize=8, framealpha=0.9)
+            ax_silt.legend(loc='lower right', bbox_to_anchor=(1.0, 1.01), ncol=2, fontsize=8, frameon=False)
 
             # Annotate borehole names directly above each column on silt profile
             for bh in custom_profile:
@@ -1280,7 +1280,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             ax_d50.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
             ax_d50.set_ylim(y_max_foot, y_min_head)
             ax_d50.grid(True, linestyle='--', alpha=0.3)
-            ax_d50.legend(loc='upper right', fontsize=8, framealpha=0.9)
+            ax_d50.legend(loc='lower right', bbox_to_anchor=(1.0, 1.01), ncol=2, fontsize=8, frameon=False)
 
             # Annotate borehole names directly above each column on d50 profile
             for bh in custom_profile:
@@ -1348,7 +1348,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 ax_inp63.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
                 ax_inp63.set_ylim(y_max_foot, y_min_head)
                 ax_inp63.grid(True, linestyle='--', alpha=0.3)
-                ax_inp63.legend(loc='upper right', fontsize=8, framealpha=0.9)
+                ax_inp63.legend(loc='lower right', bbox_to_anchor=(1.0, 1.01), ncol=2, fontsize=8, frameon=False)
 
                 cax_i63 = fig3.add_axes([0.90, 0.54, 0.015, 0.34])
                 cb_i63 = fig3.colorbar(im63, cax=cax_i63)
@@ -1368,7 +1368,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 ax_inpd50.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
                 ax_inpd50.set_ylim(y_max_foot, y_min_head)
                 ax_inpd50.grid(True, linestyle='--', alpha=0.3)
-                ax_inpd50.legend(loc='upper right', fontsize=8, framealpha=0.9)
+                ax_inpd50.legend(loc='lower right', bbox_to_anchor=(1.0, 1.01), ncol=2, fontsize=8, frameon=False)
 
                 cax_id50 = fig3.add_axes([0.90, 0.08, 0.015, 0.34])
                 cb_id50 = fig3.colorbar(imd50, cax=cax_id50)
