@@ -2210,6 +2210,31 @@ else:
     with col4:
         st.markdown(f'<div class="metric-card"><div class="metric-label">Gemiddelde d50</div><div class="metric-value">{mean_d50:.2f} mm</div></div>', unsafe_allow_html=True)
 
+    # ── Diepte-as Y-min / Y-max schuifbalk ───────────────────────────────────
+    top_y_vals = [p[1] for p in top_points] if top_points else [0.0]
+    bot_y_vals = [p[1] for p in bottom_points] if bottom_points else [20.0]
+    calc_ymin = float(np.floor(min(top_y_vals) - 1.5))
+    calc_ymax = float(np.ceil(max(bot_y_vals) + 2.5))
+    
+    slider_min_limit = float(min(-30.0, calc_ymin - 10.0))
+    slider_max_limit = float(max(60.0, calc_ymax + 15.0))
+
+    st.markdown('<div style="margin-top:1.2rem; margin-bottom:0.8rem; background:rgba(241, 245, 249, 0.5); padding:12px 18px; border-radius:8px; border:1px solid #e2e8f0;">', unsafe_allow_html=True)
+    col_yr1, col_yr2 = st.columns([2.5, 1])
+    with col_yr1:
+        profile_y_range = st.slider(
+            "📐 Profiel Diepte-as Instellen (Y-min / Y-max in m ALAT)",
+            min_value=slider_min_limit,
+            max_value=slider_max_limit,
+            value=(calc_ymin, calc_ymax),
+            step=0.5,
+            key="profile_y_range_slider",
+            help="Sleep de schuifbalken om de minimale (ondiepste) en maximale (diepste) bereiken van de Y-as (diepte) in te stellen."
+        )
+    with col_yr2:
+        st.markdown(f"<div style='margin-top:1.8rem; font-size:0.88rem; color:#475569;'><b>Boven (Y-min):</b> {profile_y_range[0]:.1f} m<br><b>Onder (Y-max):</b> {profile_y_range[1]:.1f} m</div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
     # 11. Plotly Subplots configuration
     fig_sub = make_subplots(
         rows=1, cols=2, 
@@ -2406,11 +2431,12 @@ else:
     # Configure axes
     fig_sub.update_yaxes(
         title_text="Diepte t.o.v. LAT (m)", 
-        autorange="reversed", 
+        range=[profile_y_range[1], profile_y_range[0]],
         gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
         row=1, col=1
     )
     fig_sub.update_yaxes(
+        range=[profile_y_range[1], profile_y_range[0]],
         gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
         row=1, col=2
     )
@@ -2492,7 +2518,7 @@ else:
                 )
                 yaxis_common = dict(
                     title="Diepte t.o.v. LAT (m)",
-                    autorange="reversed",
+                    range=[profile_y_range[1], profile_y_range[0]],
                     gridcolor="rgba(0,0,0,0.06)" if not is_dark_plot else "rgba(255,255,255,0.06)",
                 )
 
