@@ -1026,6 +1026,9 @@ def interpolate_spatial_2d(df_coords, sel_df, value_col, dx=25.0, interp_method=
     Returns (x_arr, y_arr, z_grid_2d).
     """
     valid_data = sel_df[sel_df[value_col].notna()].copy()
+    if valid_data.empty:
+        return None, None, None
+    valid_data = valid_data.groupby(['X', 'Y'], as_index=False)[value_col].mean()
     if len(valid_data) < 2:
         return None, None, None
 
@@ -2884,8 +2887,12 @@ if st.session_state['show_depth_interp_maps']:
                     )
 
             # Overlay Borehole Markers & Labels on %<0.063mm subplot
-            valid_63 = sel[sel['63calculated. met zoutcorrectie'].notna()]
+            valid_63 = sel[sel['63calculated. met zoutcorrectie'].notna()].copy()
             if not valid_63.empty:
+                valid_63 = valid_63.groupby(['X', 'Y'], as_index=False).agg({
+                    '63calculated. met zoutcorrectie': 'mean',
+                    'Boornummer': lambda s: ', '.join(sorted(set(s)))
+                })
                 silt_colors_arr = [get_bin_color(v, SILT_BINS, silt_map_colors) for v in valid_63['63calculated. met zoutcorrectie']]
                 fig_d_interp.add_trace(
                     go.Scatter(
@@ -2904,8 +2911,12 @@ if st.session_state['show_depth_interp_maps']:
                 )
 
             # Overlay Borehole Markers & Labels on d50 subplot
-            valid_d50 = sel[sel['d50'].notna()]
+            valid_d50 = sel[sel['d50'].notna()].copy()
             if not valid_d50.empty:
+                valid_d50 = valid_d50.groupby(['X', 'Y'], as_index=False).agg({
+                    'd50': 'mean',
+                    'Boornummer': lambda s: ', '.join(sorted(set(s)))
+                })
                 d50_colors_arr = [get_bin_color(v, D50_BINS, d50_map_colors) for v in valid_d50['d50']]
                 fig_d_interp.add_trace(
                     go.Scatter(
