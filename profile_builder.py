@@ -1196,23 +1196,29 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             bh_tick_labels = [f"{bh}\n({cum_dist[bh]:.0f}m)" for bh in custom_profile]
             top_map = dict(top_points) if top_points else {}
 
-            # Annotate borehole names directly above each column on profiles
-            for bh in custom_profile:
-                d_x = cum_dist[bh]
-                t_y = top_map.get(d_x, 10.0)
-                ax_silt.annotate(bh, (d_x, t_y), fontsize=7.5, fontweight='bold', color='#0f172a',
-                                ha='center', va='bottom', xytext=(0, 5), textcoords='offset points', zorder=6)
-                ax_d50.annotate(bh, (d_x, t_y), fontsize=7.5, fontweight='bold', color='#0f172a',
-                               ha='center', va='bottom', xytext=(0, 5), textcoords='offset points', zorder=6)
+            top_y_vals = [p[1] for p in top_points] if top_points else [0.0]
+            bot_y_vals = [p[1] for p in bottom_points] if bottom_points else [15.0]
+            if not prof_df.empty and 'Tra_tot_lat' in prof_df.columns:
+                bot_y_vals.extend(prof_df['Tra_tot_lat'].dropna().tolist())
+
+            y_min_head = min(top_y_vals) - 1.8
+            y_max_foot = max(bot_y_vals) + 1.0
 
             ax_silt.set_title("Percentage (%) < 0.063mm", fontsize=11, fontweight='bold', loc='left')
             ax_silt.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
             ax_silt.set_xlabel("Lengte langs profiel (m)", fontsize=9)
             ax_silt.set_xticks(bh_tick_vals)
             ax_silt.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
-            ax_silt.invert_yaxis()
+            ax_silt.set_ylim(y_max_foot, y_min_head)
             ax_silt.grid(True, linestyle='--', alpha=0.3)
             ax_silt.legend(loc='upper right', fontsize=8, framealpha=0.9)
+
+            # Annotate borehole names directly above each column on silt profile
+            for bh in custom_profile:
+                d_x = cum_dist[bh]
+                t_y = top_map.get(d_x, min(top_y_vals))
+                ax_silt.text(d_x, t_y - 0.4, bh, fontsize=8, fontweight='bold', color='#0f172a',
+                             ha='center', va='bottom', zorder=6)
 
             cax63 = fig2.add_axes([0.90, 0.54, 0.015, 0.34])
             cb63 = fig2.colorbar(plt.cm.ScalarMappable(norm=norm63_np, cmap=cmap63_np), cax=cax63)
@@ -1244,9 +1250,16 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             ax_d50.set_xlabel("Lengte langs profiel (m)", fontsize=9)
             ax_d50.set_xticks(bh_tick_vals)
             ax_d50.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
-            ax_d50.invert_yaxis()
+            ax_d50.set_ylim(y_max_foot, y_min_head)
             ax_d50.grid(True, linestyle='--', alpha=0.3)
             ax_d50.legend(loc='upper right', fontsize=8, framealpha=0.9)
+
+            # Annotate borehole names directly above each column on d50 profile
+            for bh in custom_profile:
+                d_x = cum_dist[bh]
+                t_y = top_map.get(d_x, min(top_y_vals))
+                ax_d50.text(d_x, t_y - 0.4, bh, fontsize=8, fontweight='bold', color='#0f172a',
+                            ha='center', va='bottom', zorder=6)
 
             caxd50 = fig2.add_axes([0.90, 0.08, 0.015, 0.34])
             cbd50 = fig2.colorbar(plt.cm.ScalarMappable(norm=normd50_np, cmap=cmapd50_np), cax=caxd50)
@@ -1294,18 +1307,18 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 # Annotate borehole names on interpolated heatmaps
                 for bh in custom_profile:
                     d_x = cum_dist[bh]
-                    t_y = top_map.get(d_x, 10.0)
-                    ax_inp63.annotate(bh, (d_x, t_y), fontsize=7.5, fontweight='bold', color='#0f172a',
-                                      ha='center', va='bottom', xytext=(0, 5), textcoords='offset points', zorder=6)
-                    ax_inpd50.annotate(bh, (d_x, t_y), fontsize=7.5, fontweight='bold', color='#0f172a',
-                                       ha='center', va='bottom', xytext=(0, 5), textcoords='offset points', zorder=6)
+                    t_y = top_map.get(d_x, min(top_y_vals))
+                    ax_inp63.text(d_x, t_y - 0.4, bh, fontsize=8, fontweight='bold', color='#0f172a',
+                                  ha='center', va='bottom', zorder=6)
+                    ax_inpd50.text(d_x, t_y - 0.4, bh, fontsize=8, fontweight='bold', color='#0f172a',
+                                   ha='center', va='bottom', zorder=6)
 
                 ax_inp63.set_title("%<0.063mm – Geïnterpoleerd", fontsize=11, fontweight='bold', loc='left')
                 ax_inp63.set_ylabel("Diepte t.o.v. LAT (m)", fontsize=9)
                 ax_inp63.set_xlabel("Lengte langs profiel (m)", fontsize=9)
                 ax_inp63.set_xticks(bh_tick_vals)
                 ax_inp63.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
-                ax_inp63.invert_yaxis()
+                ax_inp63.set_ylim(y_max_foot, y_min_head)
                 ax_inp63.grid(True, linestyle='--', alpha=0.3)
                 ax_inp63.legend(loc='upper right', fontsize=8, framealpha=0.9)
 
@@ -1325,7 +1338,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 ax_inpd50.set_xlabel("Lengte langs profiel (m)", fontsize=9)
                 ax_inpd50.set_xticks(bh_tick_vals)
                 ax_inpd50.set_xticklabels(bh_tick_labels, fontsize=7.5, fontweight='bold')
-                ax_inpd50.invert_yaxis()
+                ax_inpd50.set_ylim(y_max_foot, y_min_head)
                 ax_inpd50.grid(True, linestyle='--', alpha=0.3)
                 ax_inpd50.legend(loc='upper right', fontsize=8, framealpha=0.9)
 
@@ -1384,8 +1397,8 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                     ax_d63.scatter(dino_sel['X'], dino_sel['Y'], s=150, facecolors='none', edgecolors='black', linewidth=1.5, label='Data uit DINO-database', zorder=5)
 
             ax_d63.set_title("%<0.063mm", fontsize=11, fontweight='bold')
-            ax_d63.set_xlabel("X (EPSG:25831)", fontsize=9)
-            ax_d63.set_ylabel("Y (EPSG:25831)", fontsize=9)
+            ax_d63.set_xlabel("X", fontsize=9)
+            ax_d63.set_ylabel("Y", fontsize=9)
             ax_d63.grid(True, linestyle='--', alpha=0.3)
             ax_d63.legend(loc='lower right', fontsize=8, framealpha=0.9)
             ax_d63.set_aspect('equal', 'datalim')
@@ -1412,8 +1425,8 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                     ax_dd50.scatter(dino_sel['X'], dino_sel['Y'], s=150, facecolors='none', edgecolors='black', linewidth=1.5, label='Data uit DINO-database', zorder=5)
 
             ax_dd50.set_title("d50 (mm)", fontsize=11, fontweight='bold')
-            ax_dd50.set_xlabel("X (EPSG:25831)", fontsize=9)
-            ax_dd50.set_ylabel("Y (EPSG:25831)", fontsize=9)
+            ax_dd50.set_xlabel("X", fontsize=9)
+            ax_dd50.set_ylabel("Y", fontsize=9)
             ax_dd50.grid(True, linestyle='--', alpha=0.3)
             ax_dd50.legend(loc='lower right', fontsize=8, framealpha=0.9)
             ax_dd50.set_aspect('equal', 'datalim')
@@ -2605,9 +2618,9 @@ if show_depth_maps:
                 margin=dict(l=60, r=80, t=80, b=60),
                 paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
                 plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
-                xaxis=dict(title="X (EPSG:25831)", scaleanchor="y", scaleratio=1),
-                xaxis2=dict(title="X (EPSG:25831)", scaleanchor="y2", scaleratio=1),
-                yaxis=dict(title="Y (EPSG:25831)"),
+                xaxis=dict(title="X", scaleanchor="y", scaleratio=1),
+                xaxis2=dict(title="X", scaleanchor="y2", scaleratio=1),
+                yaxis=dict(title="Y"),
                 yaxis2=dict(title=""),
                 legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
             )
