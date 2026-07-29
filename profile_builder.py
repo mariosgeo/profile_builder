@@ -1040,7 +1040,7 @@ def interpolate_spatial_2d(df, df_coords, depth_lo, depth_hi, value_col, dx=25.0
     y_min, y_max = df_coords['Y'].min() - 50.0, df_coords['Y'].max() + 50.0
 
     dx_use = max(1.0, float(dx))
-    dy_use = max(1.0, float(dy if dy >= 1.0 else dx))
+    dy_use = dx_use  # Enforce uniform spatial grid resolution dx = dy
 
     x_arr = np.arange(x_min, x_max + dx_use, dx_use)
     y_arr = np.arange(y_min, y_max + dy_use, dy_use)
@@ -1813,15 +1813,11 @@ if st.session_state.custom_profile:
 # Interpolation settings sidebar
 st.sidebar.markdown('<div class="sidebar-title">🧩 Interpolatie-instellingen</div>', unsafe_allow_html=True)
 interp_dx = st.sidebar.number_input(
-    "Horizontale stap dx (m)",
+    "Gridstap dx (m)",
     min_value=1.0, max_value=500.0, value=10.0, step=1.0,
-    help="Gridresolutie langs het profielpad, in meters."
+    help="Uniforme gridresolutie (dx = dy), in meters."
 )
-interp_dy = st.sidebar.number_input(
-    "Dieptestap dy (m)",
-    min_value=0.05, max_value=500.0, value=0.25, step=0.05,
-    help="Gridresolutie in de diepterichting, in meters."
-)
+interp_dy = 0.25  # Internal fixed depth step for profile cross-sections
 
 _method_options = [
     "OpenCV TELEA inpainting" if HAS_CV2 else "OpenCV TELEA (niet geïnstalleerd)",
@@ -2816,7 +2812,7 @@ if gen_depth_interp_btn:
     st.session_state['show_depth_interp_maps'] = True
 
 if st.session_state['show_depth_interp_maps']:
-    st.info(f"📊 **Toegepaste Interpolatie parameters**: Methode: `{interp_method}` | Grid: `dx={interp_dx}m, dy={interp_dy}m` | Gewichten: `X={anis_x}, Y={anis_y}`")
+    st.info(f"📊 **Toegepaste Interpolatie parameters**: Methode: `{interp_method}` | Uniform Grid: `dx = dy = {interp_dx}m` | Gewichten: `X={anis_x}, Y={anis_y}`")
     
     with st.spinner("2D Diepte-interval interpolatiekaarten genereren..."):
         for depth_val in depths:
