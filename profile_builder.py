@@ -1970,7 +1970,7 @@ if use_bath_map and bath_raster_available:
             grid_size=45
         )
         if b_lats and b_lons and b_depths:
-            fig_map.add_trace(go.Densitymapbox(
+            fig_map.add_trace(go.Densitymap(
                 lat=b_lats,
                 lon=b_lons,
                 z=b_depths,
@@ -2003,7 +2003,7 @@ if len(st.session_state.custom_profile) >= 2:
     for bh in st.session_state.custom_profile:
         r = df_coords[df_coords['Boornummer'] == bh].iloc[0]
         prof_coords.append((r['lat'], r['lon']))
-    fig_map.add_trace(go.Scattermapbox(
+    fig_map.add_trace(go.Scattermap(
         lat=[p[0] for p in prof_coords],
         lon=[p[1] for p in prof_coords],
         mode='lines',
@@ -2033,7 +2033,7 @@ if not df_coords.empty:
 
 # ── Borehole Markers trace (rendered ON TOP of bathymetry & profile lines) ───
 if not df_coords.empty:
-    fig_map.add_trace(go.Scattermapbox(
+    fig_map.add_trace(go.Scattermap(
         lat=df_coords['lat'],
         lon=df_coords['lon'],
         mode='markers+text',
@@ -2081,7 +2081,7 @@ if use_bath_map and bath_raster_available:
         pass
 
 fig_map.update_layout(
-    mapbox=dict(
+    map=dict(
         style="open-street-map" if not IS_DARK else "carto-darkmatter",
         center=dict(lat=df_coords['lat'].mean() if not df_coords.empty else 51.5, lon=df_coords['lon'].mean() if not df_coords.empty else 3.5),
         zoom=map_zoom_level,
