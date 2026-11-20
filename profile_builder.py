@@ -484,8 +484,16 @@ css_styles = f"""
     }}
     
     /* Hide Streamlit default components */
-    header[data-testid="stHeader"], footer {{
+    /* Keep the header (it holds the "expand sidebar" >> button) but make it invisible */
+    header[data-testid="stHeader"] {{
+        background: transparent !important;
+    }}
+    [data-testid="stDecoration"], footer {{
         display: none !important;
+    }}
+    [data-testid="stSidebarCollapsedControl"], [data-testid="stExpandSidebarButton"] {{
+        display: flex !important;
+        visibility: visible !important;
     }}
     
     /* Global App Styling */
