@@ -2614,6 +2614,72 @@ else:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ── Shared helpers for depth-slice figures ─────────────────────────────────────
+# All depth slices are drawn as rows of ONE Plotly figure with linked axes, so a
+# manual zoom/pan on any panel is applied to every slice (double-click resets all).
+DS_ROW_PX = 480   # height of one depth-slice row (px)
+DS_GAP_PX = 80    # vertical gap between rows (room for subplot titles)
+DS_TOP_PX = 110   # top margin (legend + first subplot titles)
+DS_BOT_PX = 50
+
+
+def valid_depth_slices(df_maps, depths):
+    """Depth levels that have at least one borehole with coordinates."""
+    out = []
+    for d in depths:
+        if not df_maps[df_maps['MID_LAT'] == d].dropna(subset=['X', 'Y']).empty:
+            out.append(d)
+    return out
+
+
+def _depth_slice_plot_height(n_rows):
+    return n_rows * DS_ROW_PX + max(n_rows - 1, 0) * DS_GAP_PX
+
+
+def make_depth_slice_figure(depth_list, left_label, right_label):
+    """One row per depth slice, two columns (left / right property)."""
+    n_rows = max(len(depth_list), 1)
+    titles = []
+    for d in depth_list:
+        rng = f"{d - 0.5:.2f} – {d + 0.5:.2f} m ALAT"
+        titles += [f"<b>{left_label}</b>  ·  {rng}", f"<b>{right_label}</b>  ·  {rng}"]
+    return make_subplots(
+        rows=n_rows, cols=2,
+        subplot_titles=titles or None,
+        horizontal_spacing=0.08,
+        vertical_spacing=(DS_GAP_PX / _depth_slice_plot_height(n_rows)) if n_rows > 1 else 0.0,
+    )
+
+
+def finalize_depth_slice_figure(fig, n_rows, is_dark):
+    """Link all axes, keep equal aspect, de-duplicate legend entries."""
+    n_rows = max(n_rows, 1)
+    seen = set()
+    for tr in fig.data:
+        if tr.showlegend:
+            if tr.name in seen or not tr.name:
+                tr.showlegend = False
+            else:
+                seen.add(tr.name)
+
+    fig.update_xaxes(matches='x', title_text="X", showticklabels=True)
+    fig.update_yaxes(matches='y', title_text="Y", showticklabels=True)
+    # Equal aspect: anchor the master x-axis to the master y-axis; every other
+    # axis follows through `matches`.
+    fig.update_layout(xaxis=dict(scaleanchor="y", scaleratio=1))
+
+    fig.update_layout(
+        template="plotly_dark" if is_dark else "plotly_white",
+        height=_depth_slice_plot_height(n_rows) + DS_TOP_PX + DS_BOT_PX,
+        margin=dict(l=60, r=80, t=DS_TOP_PX, b=DS_BOT_PX),
+        paper_bgcolor="rgba(0,0,0,0)" if is_dark else "#ffffff",
+        plot_bgcolor="rgba(0,0,0,0)" if is_dark else "#ffffff",
+        legend=dict(orientation="h", yref="container", y=1, yanchor="top", x=0.5, xanchor="center"),
+        uirevision="depth_slices",  # keep the user's zoom across Streamlit reruns
+    )
+    return fig
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 12. Depth-Slice Spatial Maps  (inspired by make_maps.ipynb)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2650,7 +2716,10 @@ if show_depth_maps:
         bath_bytes_input = uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None
         bath_poly_x, bath_poly_y = get_bathymetry_polygon(bath_bytes_input)
 
-        for depth_val in depths:
+        slice_depths = valid_depth_slices(df_maps, depths)
+        fig_depth = make_depth_slice_figure(slice_depths, "%<0.063mm", "d50 (mm)")
+
+        for row_idx, depth_val in enumerate(slice_depths, start=1):
             sel = df_maps[df_maps['MID_LAT'] == depth_val].dropna(subset=['X', 'Y'])
             if len(sel) == 0:
                 continue
@@ -2658,16 +2727,6 @@ if show_depth_maps:
             depth_lo = depth_val - 0.5
             depth_hi = depth_val + 0.5
 
-            st.markdown(f'<h4 style="margin-top:1.5rem;">Diepte: {depth_lo:.2f} – {depth_hi:.2f} m ALAT</h4>', unsafe_allow_html=True)
-
-            fig_depth = make_subplots(
-                rows=1, cols=2,
-                subplot_titles=(
-                    "<b>%<0.063mm</b>",
-                    "<b>d50 (mm)</b>"
-                ),
-                horizontal_spacing=0.08
-            )
 
             # ── Bathymetry raster outline polygon ────────────────────────────
             if bath_poly_x is not None and bath_poly_y is not None:
@@ -2684,7 +2743,7 @@ if show_depth_maps:
                             showlegend=(col_idx == 1),
                             hoverinfo='skip'
                         ),
-                        row=1, col=col_idx
+                        row=row_idx, col=col_idx
                     )
 
             # ── All boreholes not at this depth → grey reference dots ─────────
@@ -2703,7 +2762,7 @@ if show_depth_maps:
                             hovertext=[f"Boring: {bh}<br>(geen laag op dit interval)" for bh in missing_bh['Boornummer']],
                             hoverinfo='text',
                         ),
-                        row=1, col=col_idx
+                        row=row_idx, col=col_idx
                     )
 
             # ── Left: Silt/Clay (%<0.063mm) ──────────────────────────────────
@@ -2728,7 +2787,7 @@ if show_depth_maps:
                         hoverinfo='text',
                         showlegend=False,
                     ),
-                    row=1, col=1
+                    row=row_idx, col=1
                 )
 
             if not nan_63.empty:
@@ -2741,7 +2800,7 @@ if show_depth_maps:
                         name='Ontbrekend / NaN',
                         showlegend=True
                     ),
-                    row=1, col=1
+                    row=row_idx, col=1
                 )
 
             # Check for DINO boreholes
@@ -2758,7 +2817,7 @@ if show_depth_maps:
                             name='Data uit DINO-database',
                             showlegend=True,
                         ),
-                        row=1, col=1
+                        row=row_idx, col=1
                     )
 
             # ── Right: d50 (mm) ───────────────────────────────────────────────
@@ -2783,7 +2842,7 @@ if show_depth_maps:
                         hoverinfo='text',
                         showlegend=False,
                     ),
-                    row=1, col=2
+                    row=row_idx, col=2
                 )
 
             if not nan_d50.empty:
@@ -2796,7 +2855,7 @@ if show_depth_maps:
                         name='Ontbrekend / NaN',
                         showlegend=False,
                     ),
-                    row=1, col=2
+                    row=row_idx, col=2
                 )
 
             if 'DINO' in sel.columns and not dino_sel.empty:
@@ -2808,7 +2867,7 @@ if show_depth_maps:
                         marker=dict(size=20, color='rgba(0,0,0,0)', line=dict(color='black', width=2)),
                         showlegend=False,
                     ),
-                    row=1, col=2
+                    row=row_idx, col=2
                 )
 
             # ── Discrete colorbar annotations (silt & d50) ───────────────────
@@ -2830,17 +2889,17 @@ if show_depth_maps:
                         cmin=0, cmax=1,
                         colorbar=dict(
                             title="%<0.063mm",
-                            x=0.44, len=0.85, y=0.5, thickness=12,
+                            x=0.44, lenmode='pixels', len=DS_ROW_PX * 0.9, y=1, yanchor='top', thickness=12,
                             tickmode='array',
                             tickvals=silt_tick_vals_map,
                             ticktext=silt_tick_text_map,
                         ),
-                        showscale=True,
+                        showscale=(row_idx == 1),
                     ),
                     showlegend=False,
                     hoverinfo='skip',
                 ),
-                row=1, col=1
+                row=row_idx, col=1
             )
 
             # d50 colorbar
@@ -2859,39 +2918,21 @@ if show_depth_maps:
                         cmin=0, cmax=1,
                         colorbar=dict(
                             title="d50 (mm)",
-                            x=1.02, len=0.85, y=0.5, thickness=12,
+                            x=1.02, lenmode='pixels', len=DS_ROW_PX * 0.9, y=1, yanchor='top', thickness=12,
                             tickmode='array',
                             tickvals=d50_tick_vals_map,
                             ticktext=d50_tick_text_map,
                         ),
-                        showscale=True,
+                        showscale=(row_idx == 1),
                     ),
                     showlegend=False,
                     hoverinfo='skip',
                 ),
-                row=1, col=2
+                row=row_idx, col=2
             )
 
-            fig_depth.update_layout(
-                title=dict(
-                    text=f"<b>Diepte-interval: {depth_lo:.2f} – {depth_hi:.2f} m ALAT</b>",
-                    x=0.5,
-                    xanchor="center",
-                    font=dict(size=15)
-                ),
-                template="plotly_dark" if is_dark_plot else "plotly_white",
-                height=520,
-                margin=dict(l=60, r=80, t=80, b=60),
-                paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
-                plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
-                xaxis=dict(title="X", scaleanchor="y", scaleratio=1),
-                xaxis2=dict(title="X", scaleanchor="y2", scaleratio=1),
-                yaxis=dict(title="Y"),
-                yaxis2=dict(title=""),
-                legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
-            )
-
-            st.plotly_chart(fig_depth, use_container_width=True, key=f"depth_slice_{depth_val}")
+        finalize_depth_slice_figure(fig_depth, len(slice_depths), is_dark_plot)
+        st.plotly_chart(fig_depth, use_container_width=True, key="depth_slice_all")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Section 8: Geïnterpoleerde Diepte-interval Kaarten (2D Spatial Interpolation)
@@ -2918,7 +2959,11 @@ if st.session_state['show_depth_interp_maps']:
     st.info(f"📊 **Toegepaste Interpolatie parameters**: Methode: `{interp_method}` | Uniform Grid: `dx = dy = {interp_dx}m` | Gewichten: `X={anis_x}, Y={anis_y}`")
     
     with st.spinner("2D Diepte-interval interpolatiekaarten genereren..."):
-        for depth_val in depths:
+        interp_depths = valid_depth_slices(df_maps, depths)
+        fig_d_interp = make_depth_slice_figure(
+            interp_depths, "%<0.063mm – Geïnterpoleerd", "d50 (mm) – Geïnterpoleerd"
+        )
+        for row_idx, depth_val in enumerate(interp_depths, start=1):
             sel = df_maps[df_maps['MID_LAT'] == depth_val].dropna(subset=['X', 'Y'])
             if len(sel) == 0:
                 continue
@@ -2938,15 +2983,6 @@ if st.session_state['show_depth_interp_maps']:
                 anis_x=anis_x, anis_y=anis_y
             )
 
-            fig_d_interp = make_subplots(
-                rows=1, cols=2,
-                subplot_titles=(
-                    "<b>%<0.063mm – Geïnterpoleerd</b>",
-                    "<b>d50 (mm) – Geïnterpoleerd</b>"
-                ),
-                horizontal_spacing=0.08
-            )
-
             # Left Subplot: %<0.063mm Spatial Heatmap
             if x_grid_63 is not None and z_grid_63 is not None:
                 z_norm_63 = map_values_to_equal_bins(z_grid_63, SILT_BINS)
@@ -2961,7 +2997,7 @@ if st.session_state['show_depth_interp_maps']:
                         hoverinfo='x+y+z',
                         name='%<0.063mm'
                     ),
-                    row=1, col=1
+                    row=row_idx, col=1
                 )
 
             # Right Subplot: d50 Spatial Heatmap
@@ -2978,7 +3014,7 @@ if st.session_state['show_depth_interp_maps']:
                         hoverinfo='x+y+z',
                         name='d50'
                     ),
-                    row=1, col=2
+                    row=row_idx, col=2
                 )
 
             # Overlay Bathymetry Polygon Outline on both subplots
@@ -2994,7 +3030,7 @@ if st.session_state['show_depth_interp_maps']:
                             showlegend=(col_idx == 1),
                             hoverinfo='skip'
                         ),
-                        row=1, col=col_idx
+                        row=row_idx, col=col_idx
                     )
 
             # Overlay Borehole Markers & Labels on %<0.063mm subplot
@@ -3018,7 +3054,7 @@ if st.session_state['show_depth_interp_maps']:
                         hoverinfo='text',
                         showlegend=False,
                     ),
-                    row=1, col=1
+                    row=row_idx, col=1
                 )
 
             # Overlay Borehole Markers & Labels on d50 subplot
@@ -3042,7 +3078,7 @@ if st.session_state['show_depth_interp_maps']:
                         hoverinfo='text',
                         showlegend=False,
                     ),
-                    row=1, col=2
+                    row=row_idx, col=2
                 )
 
             # Add DINO boreholes outline if present
@@ -3059,7 +3095,7 @@ if st.session_state['show_depth_interp_maps']:
                                 name='Data uit DINO-database' if col_idx == 1 else '',
                                 showlegend=(col_idx == 1),
                             ),
-                            row=1, col=col_idx
+                            row=row_idx, col=col_idx
                         )
 
             # Colorbars setup
@@ -3068,43 +3104,28 @@ if st.session_state['show_depth_interp_maps']:
                     x=[None], y=[None], mode='markers',
                     marker=dict(
                         size=0.001, color=[0.5], colorscale=silt_cs_plotly, cmin=0, cmax=1,
-                        colorbar=dict(title="%<0.063mm", x=0.44, len=0.85, y=0.5, thickness=12, tickmode='array', tickvals=silt_tick_vals_map, ticktext=silt_tick_text_map),
-                        showscale=True,
+                        colorbar=dict(title="%<0.063mm", x=0.44, lenmode='pixels', len=DS_ROW_PX * 0.9, y=1, yanchor='top', thickness=12, tickmode='array', tickvals=silt_tick_vals_map, ticktext=silt_tick_text_map),
+                        showscale=(row_idx == 1),
                     ),
                     showlegend=False, hoverinfo='skip',
                 ),
-                row=1, col=1
+                row=row_idx, col=1
             )
             fig_d_interp.add_trace(
                 go.Scatter(
                     x=[None], y=[None], mode='markers',
                     marker=dict(
                         size=0.001, color=[0.5], colorscale=d50_cs_plotly, cmin=0, cmax=1,
-                        colorbar=dict(title="d50 (mm)", x=1.02, len=0.85, y=0.5, thickness=12, tickmode='array', tickvals=d50_tick_vals_map, ticktext=d50_tick_text_map),
-                        showscale=True,
+                        colorbar=dict(title="d50 (mm)", x=1.02, lenmode='pixels', len=DS_ROW_PX * 0.9, y=1, yanchor='top', thickness=12, tickmode='array', tickvals=d50_tick_vals_map, ticktext=d50_tick_text_map),
+                        showscale=(row_idx == 1),
                     ),
                     showlegend=False, hoverinfo='skip',
                 ),
-                row=1, col=2
+                row=row_idx, col=2
             )
 
-            fig_d_interp.update_layout(
-                title=dict(
-                    text=f"<b>Geïnterpoleerde Diepte-interval Kaart: {depth_lo:.2f} – {depth_hi:.2f} m ALAT</b>",
-                    x=0.5, xanchor="center", font=dict(size=15)
-                ),
-                template="plotly_dark" if is_dark_plot else "plotly_white",
-                height=520,
-                margin=dict(l=60, r=80, t=80, b=60),
-                paper_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
-                plot_bgcolor="rgba(0,0,0,0)" if is_dark_plot else "#ffffff",
-                xaxis=dict(title="X", scaleanchor="y", scaleratio=1),
-                xaxis2=dict(title="X", scaleanchor="y2", scaleratio=1),
-                yaxis=dict(title="Y"),
-                yaxis2=dict(title=""),
-                legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
-            )
 
-            st.plotly_chart(fig_d_interp, use_container_width=True, key=f"depth_slice_interp_{depth_val}")
+        finalize_depth_slice_figure(fig_d_interp, len(interp_depths), is_dark_plot)
+        st.plotly_chart(fig_d_interp, use_container_width=True, key="depth_slice_interp_all")
 
 st.markdown('</div>', unsafe_allow_html=True)
