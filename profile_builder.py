@@ -2693,36 +2693,39 @@ def finalize_depth_slice_figure(fig, n_rows, is_dark):
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown('<div class="chart-wrap"><div class="chart-header"><div class="chart-title">📍 Depth-Slice Borehole Maps</div><div class="chart-subtitle">Spatial scatter plots of %<0.063mm and d50 at each unique depth level across all boreholes.</div></div>', unsafe_allow_html=True)
 
+# ── Shared data for both depth-slice sections (scatter + interpolated) ──────────
+# Defined unconditionally so the interpolated maps also work when the
+# "Show Depth-Slice Maps" checkbox is off.
+df_maps = df.copy()
+df_maps['MID_LAT'] = np.round((df_maps['Tra_van_lat'] + df_maps['Tra_tot_lat']) / 2.0, 0)
+depths = np.sort(df_maps['MID_LAT'].dropna().unique())
+
+n_bins_63_map = len(SILT_BINS) - 1
+n_bins_d50_map = len(D50_BINS) - 1
+silt_map_colors = interpolate_colors(HEX_COLORS, n_bins_63_map)
+d50_map_colors = interpolate_colors(HEX_COLORS, n_bins_d50_map)
+silt_cs_plotly = create_equal_discrete_colorscale(n_bins_63_map, HEX_COLORS)
+silt_tick_vals_map = [i / n_bins_63_map for i in range(n_bins_63_map + 1)]
+silt_tick_text_map = [f"{b:g}" for b in SILT_BINS]
+d50_cs_plotly = create_equal_discrete_colorscale(n_bins_d50_map, HEX_COLORS)
+d50_tick_vals_map = [i / n_bins_d50_map for i in range(n_bins_d50_map + 1)]
+d50_tick_text_map = [f"{b:g}" for b in D50_BINS]
+
+
+def get_depth_slice_bath_polygon():
+    bath_bytes = uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None
+    return get_bathymetry_polygon(bath_bytes)
+
+
 show_depth_maps = st.checkbox("🗺️ Show Depth-Slice Maps", value=False, help="Generate one pair of maps per depth level showing spatial distribution of properties.")
 
 if show_depth_maps:
-    # Compute MID_LAT (midpoint depth of each layer)
-    df_maps = df.copy()
-    df_maps['MID_LAT'] = np.round((df_maps['Tra_van_lat'] + df_maps['Tra_tot_lat']) / 2.0,0)
-    depths = np.sort(df_maps['MID_LAT'].dropna().unique())
-
     if len(depths) == 0:
         st.warning("No valid depth layers found in the dataset.")
     else:
         st.info(f"📊 Generating **{len(depths)}** depth-slice map pairs...")
 
-        # Build Plotly-compatible discrete colorscale for scatter markers
-        n_bins_63_map = len(SILT_BINS) - 1
-        n_bins_d50_map = len(D50_BINS) - 1
-        silt_map_colors = interpolate_colors(HEX_COLORS, n_bins_63_map)
-        d50_map_colors = interpolate_colors(HEX_COLORS, n_bins_d50_map)
-
-        def get_bin_color(val, bins, colors):
-            """Return color for a value based on discrete bins."""
-            if pd.isna(val):
-                return '#999999'
-            for i in range(len(bins) - 1):
-                if val < bins[i + 1]:
-                    return colors[min(i, len(colors) - 1)]
-            return colors[-1]
-
-        bath_bytes_input = uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None
-        bath_poly_x, bath_poly_y = get_bathymetry_polygon(bath_bytes_input)
+        bath_poly_x, bath_poly_y = get_depth_slice_bath_polygon()
 
         slice_depths = valid_depth_slices(df_maps, depths)
         fig_depth = make_depth_slice_figure(slice_depths, "%<0.063mm", "d50 (mm)")
@@ -2964,9 +2967,26 @@ if gen_depth_interp_btn:
     st.session_state['show_depth_interp_maps'] = True
 
 if st.session_state['show_depth_interp_maps']:
-    st.info(f"📊 **Toegepaste Interpolatie parameters**: Methode: `{interp_method}` | Uniform Grid: `dx = dy = {interp_dx}m` | Gewichten: `X={anis_x}, Y={anis_y}`")
+    # All slices go into one Plotly figure, so cap the total number of grid cells:
+    # a fine dx over a large area would otherwise produce GB-sized charts (and
+    # exhaust memory during interpolation). Coarsen dx only when needed.
+    DS_MAX_TOTAL_CELLS = 6_000_000
+    _n_grids = max(2 * len(valid_depth_slices(df_maps, depths)), 1)
+    _area = ((df_coords['X'].max() - df_coords['X'].min() + 100.0)
+             * (df_coords['Y'].max() - df_coords['Y'].min() + 100.0))
+    _dx_min = float(np.ceil(np.sqrt(_area * _n_grids / DS_MAX_TOTAL_CELLS)))
+    depth_interp_dx = max(float(interp_dx), _dx_min)
+
+    st.info(f"📊 **Toegepaste Interpolatie parameters**: Methode: `{interp_method}` | Uniform Grid: `dx = dy = {depth_interp_dx:g}m` | Gewichten: `X={anis_x}, Y={anis_y}`")
+    if depth_interp_dx > interp_dx:
+        st.warning(
+            f"⚠️ Gridstap voor de diepte-interval kaarten automatisch verhoogd van "
+            f"{interp_dx:g} m naar {depth_interp_dx:g} m: het gebied is te groot voor "
+            f"{_n_grids} kaarten met dx = {interp_dx:g} m."
+        )
     
     with st.spinner("2D Diepte-interval interpolatiekaarten genereren..."):
+        bath_poly_x, bath_poly_y = get_depth_slice_bath_polygon()
         interp_depths = valid_depth_slices(df_maps, depths)
         fig_d_interp = make_depth_slice_figure(
             interp_depths, "%<0.063mm – Geïnterpoleerd", "d50 (mm) – Geïnterpoleerd"
@@ -2982,18 +3002,18 @@ if st.session_state['show_depth_interp_maps']:
             # Perform 2D Spatial Interpolation for %<0.063mm and d50
             x_grid_63, y_grid_63, z_grid_63 = interpolate_spatial_2d(
                 df_coords, sel, "63calculated. met zoutcorrectie",
-                dx=interp_dx, interp_method=interp_method,
+                dx=depth_interp_dx, interp_method=interp_method,
                 anis_x=anis_x, anis_y=anis_y
             )
             x_grid_d50, y_grid_d50, z_grid_d50 = interpolate_spatial_2d(
                 df_coords, sel, "d50",
-                dx=interp_dx, interp_method=interp_method,
+                dx=depth_interp_dx, interp_method=interp_method,
                 anis_x=anis_x, anis_y=anis_y
             )
 
             # Left Subplot: %<0.063mm Spatial Heatmap
             if x_grid_63 is not None and z_grid_63 is not None:
-                z_norm_63 = map_values_to_equal_bins(z_grid_63, SILT_BINS)
+                z_norm_63 = np.asarray(map_values_to_equal_bins(z_grid_63, SILT_BINS), dtype=np.float32)
                 fig_d_interp.add_trace(
                     go.Heatmap(
                         x=x_grid_63,
@@ -3010,7 +3030,7 @@ if st.session_state['show_depth_interp_maps']:
 
             # Right Subplot: d50 Spatial Heatmap
             if x_grid_d50 is not None and z_grid_d50 is not None:
-                z_norm_d50 = map_values_to_equal_bins(z_grid_d50, D50_BINS)
+                z_norm_d50 = np.asarray(map_values_to_equal_bins(z_grid_d50, D50_BINS), dtype=np.float32)
                 fig_d_interp.add_trace(
                     go.Heatmap(
                         x=x_grid_d50,
