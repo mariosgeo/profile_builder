@@ -116,6 +116,198 @@ def get_bin_color(val, bins, colors):
             return colors[min(i, len(colors) - 1)]
     return colors[-1]
 
+# ── GIS layers (shapefiles from an uploaded folder) ───────────────────────────
+GIS_EXTENSIONS = ["shp", "shx", "dbf", "prj", "cpg", "qmd"]
+GIS_COLORS = ['#7c3aed', '#db2777', '#0d9488', '#b45309', '#4338ca', '#15803d']
+GIS_MAX_PANEL_VERTICES = 1_000_000  # budget for a layer repeated over all slice panels
+
+
+@st.cache_data(show_spinner=False)
+def load_gis_layers(files):
+    """
+    Read every shapefile in an uploaded folder.
+
+    files : tuple of (relative_path, bytes)
+    Returns (layers, messages). Each layer holds parts (list of N×2 arrays in
+    EPSG:25831), kind, attribute fields, and one record + label point per shape.
+    """
+    import os
+    import shapefile
+    from pyproj import CRS
+    import xml.etree.ElementTree as ET
+
+    groups = {}
+    for path, data in files:
+        stem, ext = os.path.splitext(path)
+        groups.setdefault(stem, {})[ext.lower().lstrip('.')] = data
+
+    layers, messages = [], []
+    shp_groups = {k: v for k, v in groups.items() if 'shp' in v}
+    if not shp_groups:
+        return [], ["Geen `.shp`-bestand gevonden in de geselecteerde map."]
+
+    for stem, g in sorted(shp_groups.items()):
+        name = os.path.basename(stem)
+        try:
+            # CRS: .prj first, then the WKT in the QGIS .qmd, then EPSG:25831
+            crs = None
+            if 'prj' in g:
+                try:
+                    crs = CRS.from_wkt(g['prj'].decode('utf-8-sig', 'replace').strip())
+                except Exception:
+                    crs = None
+            if crs is None and 'qmd' in g:
+                try:
+                    wkt = ET.fromstring(g['qmd']).findtext('.//crs/spatialrefsys/wkt')
+                    crs = CRS.from_wkt(wkt) if wkt else None
+                except Exception:
+                    crs = None
+            if crs is None:
+                crs = CRS.from_epsg(25831)
+                messages.append(f"**{name}**: geen bruikbare `.prj`/`.qmd`; EPSG:25831 aangenomen.")
+            to_25831 = Transformer.from_crs(crs, "EPSG:25831", always_xy=True)
+
+            encoding = g['cpg'].decode('ascii', 'ignore').strip() if 'cpg' in g else ''
+            if encoding.isdigit():
+                encoding = 'utf-8' if encoding == '65001' else f'cp{encoding}'
+            try:
+                ''.encode(encoding or 'utf-8')
+            except LookupError:
+                encoding = 'utf-8'
+            kwargs = {'shp': io.BytesIO(g['shp']), 'encoding': encoding or 'utf-8', 'encodingErrors': 'replace'}
+            for ext in ('shx', 'dbf'):
+                if ext in g:
+                    kwargs[ext] = io.BytesIO(g[ext])
+            reader = shapefile.Reader(**kwargs)
+
+            fields = [f[0] for f in reader.fields if f[0] != 'DeletionFlag'] if 'dbf' in g else []
+            parts, records, label_pts, kind = [], [], [], None
+            for i, shape in enumerate(reader.iterShapes()):
+                if not shape.points:
+                    continue
+                xy = np.array([pt[:2] for pt in shape.points], dtype=float)
+                px, py = to_25831.transform(xy[:, 0], xy[:, 1])
+                pts = np.column_stack([px, py])
+                if not np.isfinite(pts).all():
+                    raise ValueError("coördinaten konden niet naar EPSG:25831 worden omgezet")
+                base = shape.shapeTypeName
+                if 'POINT' in base:
+                    kind = 'point'
+                    parts.append(pts)
+                else:
+                    kind = 'polygon' if 'POLYGON' in base else 'line'
+                    starts = list(getattr(shape, 'parts', [0])) + [len(pts)]
+                    parts += [pts[a:b] for a, b in zip(starts[:-1], starts[1:]) if b > a]
+                records.append([str(v).strip() for v in reader.record(i)] if fields else [])
+                label_pts.append((pts.min(axis=0) + pts.max(axis=0)) / 2.0)
+            if not parts:
+                messages.append(f"**{name}**: bevat geen geometrie.")
+                continue
+            layers.append(dict(name=name, kind=kind, parts=parts, fields=fields,
+                               records=records, label_pts=np.array(label_pts)))
+        except Exception as e:
+            messages.append(f"**{name}**: kon niet worden gelezen ({e}).")
+    return layers, messages
+
+
+def gis_xy(layer, max_vertices=None):
+    """Flatten a layer to x/y lists, with None between parts; thin if over budget."""
+    total = sum(len(p) for p in layer['parts'])
+    step = max(1, int(np.ceil(total / max_vertices))) if max_vertices else 1
+    xs, ys = [], []
+    for part in layer['parts']:
+        q = part
+        if step > 1:
+            # keep the last vertex so polygon rings stay closed
+            q = part[::step] if layer['kind'] == 'point' else np.vstack([part[:-1:step], part[-1:]])
+        xs += q[:, 0].tolist()
+        ys += q[:, 1].tolist()
+        if layer['kind'] != 'point':
+            xs.append(None)
+            ys.append(None)
+    return xs, ys
+
+
+def gis_labels(layer):
+    """(points, texts) for the attribute chosen by the user; empty values are dropped."""
+    field = layer.get('label_field')
+    if not field or field not in layer['fields']:
+        return np.empty((0, 2)), []
+    k = layer['fields'].index(field)
+    keep = [i for i, r in enumerate(layer['records']) if r[k] not in ('', 'None')]
+    return layer['label_pts'][keep], [layer['records'][i][k] for i in keep]
+
+
+def add_gis_to_map(fig, layers):
+    to_ll = Transformer.from_crs("EPSG:25831", "EPSG:4326", always_xy=True)
+    for layer in layers:
+        xs, ys = gis_xy(layer)
+        ok = [x is not None for x in xs]
+        lon, lat = to_ll.transform([x for x in xs if x is not None], [y for y in ys if y is not None])
+        it = iter(zip(lon, lat))
+        ll = [next(it) if o else (None, None) for o in ok]
+        style = (dict(mode='markers', marker=dict(size=7, color=layer['color'])) if layer['kind'] == 'point'
+                 else dict(mode='lines', line=dict(color=layer['color'], width=2)))
+        # hoverinfo='skip' so GIS features never intercept borehole clicks
+        fig.add_trace(go.Scattermap(lon=[v[0] for v in ll], lat=[v[1] for v in ll],
+                                    hoverinfo='skip', name=layer['name'], **style))
+        pts, texts = gis_labels(layer)
+        if texts:
+            llon, llat = to_ll.transform(pts[:, 0], pts[:, 1])
+            fig.add_trace(go.Scattermap(lon=llon, lat=llat, mode='text', text=texts, hoverinfo='skip',
+                                        textfont=dict(size=12, color=layer['color']), name=layer['name']))
+
+
+def add_gis_to_slices(fig, layers, n_rows):
+    """Draw the GIS layers in both panels of every depth-slice row."""
+    for layer in layers:
+        xs, ys = gis_xy(layer, GIS_MAX_PANEL_VERTICES // max(2 * n_rows, 1))
+        pts, texts = gis_labels(layer)
+        style = (dict(mode='markers', marker=dict(size=6, color=layer['color'])) if layer['kind'] == 'point'
+                 else dict(mode='lines', line=dict(color=layer['color'], width=1.5)))
+        for r in range(1, n_rows + 1):
+            for c in (1, 2):
+                fig.add_trace(go.Scatter(x=xs, y=ys, name=layer['name'], hoverinfo='skip',
+                                         showlegend=(r == 1 and c == 1), **style), row=r, col=c)
+                if texts:
+                    fig.add_trace(go.Scatter(x=pts[:, 0], y=pts[:, 1], mode='text', text=texts,
+                                             textfont=dict(size=9, color=layer['color']),
+                                             hoverinfo='skip', showlegend=False), row=r, col=c)
+
+
+def add_gis_to_axes(axes, layers):
+    """Draw the GIS layers on matplotlib axes without changing their extent."""
+    for ax in axes:
+        xlim, ylim = ax.get_xlim(), ax.get_ylim()
+        for layer in layers:
+            xs, ys = gis_xy(layer)
+            xs = [np.nan if v is None else v for v in xs]
+            ys = [np.nan if v is None else v for v in ys]
+            ax.plot(xs, ys, color=layer['color'], zorder=3, linewidth=1.0,
+                    linestyle='none' if layer['kind'] == 'point' else '-',
+                    marker='.' if layer['kind'] == 'point' else None)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+
+
+def bath_polygon_near(poly_x, poly_y, df_coords):
+    """Drop the raster outline when it does not overlap the boreholes (it would
+    otherwise stretch the axes to a far-away raster)."""
+    if poly_x is None or poly_y is None:
+        return None, None
+    if (max(poly_x) < df_coords['X'].min() or min(poly_x) > df_coords['X'].max()
+            or max(poly_y) < df_coords['Y'].min() or min(poly_y) > df_coords['Y'].max()):
+        return None, None
+    return poly_x, poly_y
+
+
+def capped_grid_step(df_coords, dx, n_grids, max_total_cells):
+    """Coarsen dx only when n_grids maps would exceed max_total_cells in total."""
+    area = ((df_coords['X'].max() - df_coords['X'].min() + 100.0)
+            * (df_coords['Y'].max() - df_coords['Y'].min() + 100.0))
+    return max(float(dx), float(np.ceil(np.sqrt(area * max(n_grids, 1) / max_total_cells))))
+
+
 def get_bathymetry_polygon(bath_file_bytes=None):
     """Returns (poly_x, poly_y) in EPSG:25831 representing the bathymetry raster boundary polygon."""
     try:
@@ -737,6 +929,26 @@ with col_up2:
     use_bath_map = st.checkbox("🗺️ Bathymetriekaart Modus Inschakelen", value=True, help="Vink uit om bathymetriekaart sampling uit te schakelen en maaiveldhoogtes rechtstreeks uit het Excel-bestand te gebruiken.")
     uploaded_bath_file = st.file_uploader("📂 Upload Aangepaste Bathymetriekaart (.img / .tif)", type=["img", "tif", "tiff"])
 
+gis_layers = []
+if st.checkbox("🗂️ GIS-lagen toevoegen (optioneel)", value=False, help="Selecteer een map met shapefiles (.shp, .shx, .dbf, .prj, .cpg, .qmd). Alle shapefiles in de map worden op de kaarten getekend."):
+    gis_files = st.file_uploader(
+        "📁 Selecteer een map met GIS-bestanden",
+        type=GIS_EXTENSIONS, accept_multiple_files="directory", key="gis_folder"
+    )
+    if gis_files:
+        gis_layers, gis_messages = load_gis_layers(tuple((f.name, f.getvalue()) for f in gis_files))
+        for msg in gis_messages:
+            st.warning(msg)
+        for i, layer in enumerate(gis_layers):
+            layer['color'] = GIS_COLORS[i % len(GIS_COLORS)]
+            options = ["(geen)"] + layer['fields']
+            default = next((k for k, f in enumerate(options) if k and ('naam' in f.lower() or 'name' in f.lower())), 0)
+            choice = st.selectbox(
+                f"🏷️ Label voor {layer['name']} ({len(layer['records'])} objecten)",
+                options=options, index=default, key=f"gis_label_{i}_{layer['name']}"
+            )
+            layer['label_field'] = None if choice == "(geen)" else choice
+
 if uploaded_file is None:
     st.info("👋 **Welkom bij Borehole Profile Builder!** Upload hierboven uw Boringen Excel-bestand (`.xlsx`) om te beginnen.")
     st.stop()
@@ -1122,7 +1334,7 @@ def interpolate_spatial_2d(df_coords, sel_df, value_col, dx=25.0, interp_method=
 # ══════════════════════════════════════════════════════════════════════════════
 def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, interp_method,
                         anis_x, anis_y, use_bath_map, bath_raster_available, uploaded_bath_file,
-                        bar_width, show_labels, selected_cmap_63, selected_cmap_d50):
+                        bar_width, show_labels, selected_cmap_63, selected_cmap_d50, gis_layers=()):
     """
     Generates a high-quality multi-page PDF report in landscape orientation (A4).
     - Page 1: Cover Summary (Dataset stats, selected profile, interpolation settings & location map)
@@ -1165,8 +1377,8 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
     bottom_points = []
     is_bath_top = False
 
+    bath_bytes = uploaded_bath_file.getvalue() if (use_bath_map and uploaded_bath_file is not None) else None
     if len(custom_profile) >= 2:
-        bath_bytes = uploaded_bath_file.getvalue() if (use_bath_map and uploaded_bath_file is not None) else None
         bath_sampled = get_profile_bathymetry(custom_profile, df_coords, bath_file_bytes=bath_bytes if bath_raster_available else None, step_m=5.0)
         if bath_sampled and len(bath_sampled) > 1:
             top_points = bath_sampled
@@ -1188,7 +1400,9 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                 top_y = dict(top_points).get(d_x, 10.0)
                 bottom_points.append((d_x, top_y + 5.0))
 
-    bath_poly_x, bath_poly_y = get_bathymetry_polygon(bath_bytes)
+    bath_poly_x, bath_poly_y = bath_polygon_near(*get_bathymetry_polygon(bath_bytes), df_coords)
+    # A4 panel: more cells than this are not visible but make the report hang
+    slice_dx = capped_grid_step(df_coords, interp_dx, 1, 250_000)
 
     # Discrete Colormaps setup for Matplotlib
     n_b63 = len(SILT_BINS) - 1
@@ -1581,6 +1795,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             ax_dd50.legend(loc='lower right', fontsize=8, framealpha=0.9)
             ax_dd50.set_aspect('equal', 'datalim')
 
+            add_gis_to_axes((ax_d63, ax_dd50), gis_layers)
             pdf.savefig(fig_d)
             plt.close(fig_d)
 
@@ -1588,12 +1803,12 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
             try:
                 x_g63, y_g63, z_g63 = interpolate_spatial_2d(
                     df_coords, sel, "63calculated. met zoutcorrectie",
-                    dx=interp_dx, interp_method=interp_method,
+                    dx=slice_dx, interp_method=interp_method,
                     anis_x=anis_x, anis_y=anis_y
                 )
                 x_gd50, y_gd50, z_gd50 = interpolate_spatial_2d(
                     df_coords, sel, "d50",
-                    dx=interp_dx, interp_method=interp_method,
+                    dx=slice_dx, interp_method=interp_method,
                     anis_x=anis_x, anis_y=anis_y
                 )
 
@@ -1604,7 +1819,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
 
                     # %<0.063mm Interpolated Map
                     if z_g63 is not None and x_g63 is not None and y_g63 is not None:
-                        im_di63 = ax_di63.pcolormesh(x_g63, y_g63, z_g63, cmap=cmap63_np, norm=norm63_np, shading='auto', zorder=1)
+                        im_di63 = ax_di63.pcolormesh(x_g63, y_g63, z_g63, cmap=cmap63_np, norm=norm63_np, shading='auto', zorder=1, rasterized=True)
                         cax_di63 = fig_di.add_axes([0.45, 0.12, 0.012, 0.72])
                         cb_di63 = fig_di.colorbar(im_di63, cax=cax_di63)
                         cb_di63.set_label("%<0.063mm", fontsize=8)
@@ -1633,7 +1848,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
 
                     # d50 Interpolated Map
                     if z_gd50 is not None and x_gd50 is not None and y_gd50 is not None:
-                        im_did50 = ax_did50.pcolormesh(x_gd50, y_gd50, z_gd50, cmap=cmapd50_np, norm=normd50_np, shading='auto', zorder=1)
+                        im_did50 = ax_did50.pcolormesh(x_gd50, y_gd50, z_gd50, cmap=cmapd50_np, norm=normd50_np, shading='auto', zorder=1, rasterized=True)
                         cax_did50 = fig_di.add_axes([0.92, 0.12, 0.012, 0.72])
                         cb_did50 = fig_di.colorbar(im_did50, cax=cax_did50)
                         cb_did50.set_label("d50 (mm)", fontsize=8)
@@ -1660,6 +1875,7 @@ def generate_pdf_report(df, df_coords, custom_profile, interp_dx, interp_dy, int
                     ax_did50.grid(True, linestyle='--', alpha=0.3)
                     ax_did50.set_aspect('equal', 'datalim')
 
+                    add_gis_to_axes((ax_di63, ax_did50), gis_layers)
                     pdf.savefig(fig_di)
                     plt.close(fig_di)
             except Exception:
@@ -1769,8 +1985,17 @@ st.sidebar.markdown('<div class="sidebar-title">🎨 Kleurbereik & Paletten</div
 cmap_options = ['Custom (Discrete)', 'Viridis', 'Plasma', 'Cividis', 'Inferno', 'Magma', 'Turbo', 'Rainbow', 'Spectral_r', 'coolwarm']
 selected_cmap_63 = st.sidebar.selectbox("Kleurenschaal %<0.063mm", options=cmap_options, index=0, key="cmap_63")
 
-min_63_data = float(df['63calculated. met zoutcorrectie'].min()) if has_df else 0.0
-max_63_data = float(df['63calculated. met zoutcorrectie'].max()) if has_df else 25.0
+def data_range(col, lo_lim, hi_lim, fallback):
+    """Slider start range; an empty column would give NaN limits and break the slider."""
+    vals = pd.to_numeric(df[col], errors='coerce').dropna()
+    if vals.empty:
+        return fallback
+    return float(np.clip(vals.min(), lo_lim, hi_lim)), float(np.clip(vals.max(), lo_lim, hi_lim))
+
+
+min_63_data, max_63_data = data_range('63calculated. met zoutcorrectie', 0.0, 50.0, (0.0, 25.0))
+if df['63calculated. met zoutcorrectie'].isna().all():
+    st.sidebar.caption("ℹ️ Geen waarden voor %<0.063mm in dit bestand.")
 limits_63 = st.sidebar.slider(
     "Bereik %<0.063mm",
     min_value=0.0,
@@ -1783,8 +2008,7 @@ limits_63 = st.sidebar.slider(
 # d50 colormaps
 selected_cmap_d50 = st.sidebar.selectbox("Kleurenschaal d50", options=cmap_options, index=0, key="cmap_d50")
 
-min_d50_data = float(df['d50'].min()) if has_df else 0.0
-max_d50_data = float(df['d50'].max()) if has_df else 1.0
+min_d50_data, max_d50_data = data_range('d50', 0.0, 10.0, (0.0, 1.0))
 limits_d50 = st.sidebar.slider(
     "Bereik d50 (mm)",
     min_value=0.0,
@@ -1943,7 +2167,8 @@ if st.sidebar.button("⚙️ Genereer PDF-rapport", use_container_width=True, he
             df, df_coords, st.session_state.custom_profile,
             interp_dx, interp_dy, interp_method,
             anis_x, anis_y, use_bath_map, bath_raster_available, uploaded_bath_file,
-            bar_width, show_labels, selected_cmap_63, selected_cmap_d50
+            bar_width, show_labels, selected_cmap_63, selected_cmap_d50,
+            gis_layers=gis_layers
         )
         st.session_state.pdf_report_bytes = pdf_data
 
@@ -2004,6 +2229,9 @@ if use_bath_map and bath_raster_available:
             ))
     except Exception:
         pass
+
+# GIS layers (rendered below profile path and borehole markers)
+add_gis_to_map(fig_map, gis_layers)
 
 # Profile path line (rendered below borehole markers)
 if len(st.session_state.custom_profile) >= 2:
@@ -2675,6 +2903,13 @@ def finalize_depth_slice_figure(fig, n_rows, is_dark):
     # Equal aspect: anchor the master x-axis to the master y-axis; every other
     # axis follows through `matches`.
     fig.update_layout(xaxis=dict(scaleanchor="y", scaleratio=1))
+    if gis_layers:
+        # Start at the borehole area; GIS layers may extend far beyond it
+        x0, x1 = df_coords['X'].min(), df_coords['X'].max()
+        y0, y1 = df_coords['Y'].min(), df_coords['Y'].max()
+        pad = max(0.05 * max(x1 - x0, y1 - y0), 100.0)
+        fig.update_xaxes(range=[x0 - pad, x1 + pad])
+        fig.update_yaxes(range=[y0 - pad, y1 + pad])
 
     fig.update_layout(
         template="plotly_dark" if is_dark else "plotly_white",
@@ -2714,7 +2949,7 @@ d50_tick_text_map = [f"{b:g}" for b in D50_BINS]
 
 def get_depth_slice_bath_polygon():
     bath_bytes = uploaded_bath_file.getvalue() if uploaded_bath_file is not None else None
-    return get_bathymetry_polygon(bath_bytes)
+    return bath_polygon_near(*get_bathymetry_polygon(bath_bytes), df_coords)
 
 
 show_depth_maps = st.checkbox("🗺️ Show Depth-Slice Maps", value=False, help="Generate one pair of maps per depth level showing spatial distribution of properties.")
@@ -2942,6 +3177,7 @@ if show_depth_maps:
                 row=row_idx, col=2
             )
 
+        add_gis_to_slices(fig_depth, gis_layers, len(slice_depths))
         finalize_depth_slice_figure(fig_depth, len(slice_depths), is_dark_plot)
         st.plotly_chart(fig_depth, use_container_width=True, key="depth_slice_all")
 
@@ -2972,10 +3208,7 @@ if st.session_state['show_depth_interp_maps']:
     # exhaust memory during interpolation). Coarsen dx only when needed.
     DS_MAX_TOTAL_CELLS = 6_000_000
     _n_grids = max(2 * len(valid_depth_slices(df_maps, depths)), 1)
-    _area = ((df_coords['X'].max() - df_coords['X'].min() + 100.0)
-             * (df_coords['Y'].max() - df_coords['Y'].min() + 100.0))
-    _dx_min = float(np.ceil(np.sqrt(_area * _n_grids / DS_MAX_TOTAL_CELLS)))
-    depth_interp_dx = max(float(interp_dx), _dx_min)
+    depth_interp_dx = capped_grid_step(df_coords, interp_dx, _n_grids, DS_MAX_TOTAL_CELLS)
 
     st.info(f"📊 **Toegepaste Interpolatie parameters**: Methode: `{interp_method}` | Uniform Grid: `dx = dy = {depth_interp_dx:g}m` | Gewichten: `X={anis_x}, Y={anis_y}`")
     if depth_interp_dx > interp_dx:
@@ -3153,6 +3386,7 @@ if st.session_state['show_depth_interp_maps']:
             )
 
 
+        add_gis_to_slices(fig_d_interp, gis_layers, len(interp_depths))
         finalize_depth_slice_figure(fig_d_interp, len(interp_depths), is_dark_plot)
         st.plotly_chart(fig_d_interp, use_container_width=True, key="depth_slice_interp_all")
 

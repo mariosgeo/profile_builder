@@ -1,4 +1,4 @@
-streamlit
+streamlit>=1.57
 pandas
 numpy
 plotly
@@ -12,3 +12,4 @@ contextily
 matplotlib
 rasterio
 Pillow
+pyshp>=2.3.1
