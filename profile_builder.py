@@ -939,15 +939,21 @@ if st.checkbox("🗂️ GIS-lagen toevoegen (optioneel)", value=False, help="Sel
         gis_layers, gis_messages = load_gis_layers(tuple((f.name, f.getvalue()) for f in gis_files))
         for msg in gis_messages:
             st.warning(msg)
+        show_gis_labels = (
+            st.toggle("🏷️ Toon labels GIS-lagen", value=True, key="gis_labels_on",
+                      help="Zet de tekstlabels van de GIS-lagen aan of uit op alle kaarten.")
+            if gis_layers else False
+        )
         for i, layer in enumerate(gis_layers):
             layer['color'] = GIS_COLORS[i % len(GIS_COLORS)]
             options = ["(geen)"] + layer['fields']
             default = next((k for k, f in enumerate(options) if k and ('naam' in f.lower() or 'name' in f.lower())), 0)
             choice = st.selectbox(
-                f"🏷️ Label voor {layer['name']} ({len(layer['records'])} objecten)",
-                options=options, index=default, key=f"gis_label_{i}_{layer['name']}"
+                f"Labelveld voor {layer['name']} ({len(layer['records'])} objecten)",
+                options=options, index=default, key=f"gis_label_{i}_{layer['name']}",
+                disabled=not show_gis_labels
             )
-            layer['label_field'] = None if choice == "(geen)" else choice
+            layer['label_field'] = None if (choice == "(geen)" or not show_gis_labels) else choice
 
 if uploaded_file is None:
     st.info("👋 **Welkom bij Borehole Profile Builder!** Upload hierboven uw Boringen Excel-bestand (`.xlsx`) om te beginnen.")
