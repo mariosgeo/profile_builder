@@ -2958,6 +2958,12 @@ def get_depth_slice_bath_polygon():
     return bath_polygon_near(*get_bathymetry_polygon(bath_bytes), df_coords)
 
 
+show_slice_values = st.toggle(
+    "🔢 Toon waarden bij de punten", value=True, key="slice_values_on",
+    help="Zet de getallen naast de boringpunten in de diepte-interval kaarten (ook de geïnterpoleerde) aan of uit. Uit = alleen de kleur."
+)
+slice_marker_mode = 'markers+text' if show_slice_values else 'markers'
+
 show_depth_maps = st.checkbox("🗺️ Show Depth-Slice Maps", value=False, help="Generate one pair of maps per depth level showing spatial distribution of properties.")
 
 if show_depth_maps:
@@ -3027,7 +3033,7 @@ if show_depth_maps:
                     go.Scatter(
                         x=valid_63['X'],
                         y=valid_63['Y'],
-                        mode='markers+text',
+                        mode=slice_marker_mode,
                         marker=dict(size=14, color=silt_colors_arr, line=dict(color='black', width=0.5)),
                         text=[f"{v:.1f}%" for v in valid_63['63calculated. met zoutcorrectie']],
                         textposition='top center',
@@ -3082,7 +3088,7 @@ if show_depth_maps:
                     go.Scatter(
                         x=valid_d50['X'],
                         y=valid_d50['Y'],
-                        mode='markers+text',
+                        mode=slice_marker_mode,
                         marker=dict(size=14, color=d50_colors_arr, line=dict(color='black', width=0.5)),
                         text=[f"{v:.3f}" for v in valid_d50['d50']],
                         textposition='top center',
@@ -3312,7 +3318,7 @@ if st.session_state['show_depth_interp_maps']:
                     go.Scatter(
                         x=valid_63['X'],
                         y=valid_63['Y'],
-                        mode='markers+text',
+                        mode=slice_marker_mode,
                         marker=dict(size=12, color=silt_colors_arr, line=dict(color='black', width=0.5)),
                         text=[f"{v:.1f}%" for v in valid_63['63calculated. met zoutcorrectie']],
                         textposition='top center',
@@ -3336,7 +3342,7 @@ if st.session_state['show_depth_interp_maps']:
                     go.Scatter(
                         x=valid_d50['X'],
                         y=valid_d50['Y'],
-                        mode='markers+text',
+                        mode=slice_marker_mode,
                         marker=dict(size=12, color=d50_colors_arr, line=dict(color='black', width=0.5)),
                         text=[f"{v:.3f}" for v in valid_d50['d50']],
                         textposition='top center',
